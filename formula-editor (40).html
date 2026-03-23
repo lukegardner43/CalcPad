@@ -1,0 +1,2277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>T4 Calculations — Perega</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --rubine:#E50076;--purple:#554596;--golden:#F9B000;
+  --dark:#505050;--mid:#7a7a7a;--bdr:#888;
+}
+
+/* ═══════════════════════════
+   SCREEN
+   ═══════════════════════════ */
+body{
+  font-family:Arial,sans-serif;font-size:11px;background:#c8c8c8;
+  color:var(--dark);display:flex;flex-direction:column;align-items:center;padding:0 0 80px;
+}
+.toolbar{
+  width:100%;background:#fff;border-bottom:2px solid var(--rubine);
+  padding:6px 18px;display:flex;align-items:center;gap:3px;flex-wrap:wrap;
+  position:sticky;top:0;z-index:200;box-shadow:0 2px 6px rgba(0,0,0,.14);
+}
+.logo{font-weight:900;font-size:18px;letter-spacing:.04em;margin-right:12px;
+  display:flex;align-items:baseline;user-select:none}
+.logo .p1,.logo .p2,.logo .p4{color:var(--rubine)}
+.logo .p3{color:var(--golden)}.logo .p5,.logo .p6{color:var(--purple)}
+.sep{width:1px;height:20px;background:#ddd;margin:0 4px}
+.tbtn{min-width:26px;height:26px;padding:0 5px;border:1px solid transparent;
+  background:transparent;border-radius:2px;cursor:pointer;display:inline-flex;
+  align-items:center;justify-content:center;gap:4px;font-family:Arial,sans-serif;
+  font-size:12px;font-weight:700;color:var(--dark);transition:background .1s}
+.tbtn:hover{background:#fce6f1;border-color:#f4a8cc;color:var(--rubine)}
+.tbtn svg{width:13px;height:13px;fill:currentColor}
+.print-btn{background:var(--rubine)!important;color:#fff!important;
+  border-color:var(--rubine)!important;padding:0 14px!important;margin-left:6px}
+.print-btn:hover{background:#b8005e!important}
+/* Font size + colour controls */
+.tbsel-sm{height:26px;padding:0 4px;border:1px solid #ddd;background:#fff;border-radius:2px;
+  font-family:Arial,sans-serif;font-size:11px;color:var(--dark);outline:none;width:52px}
+/* File menu */
+.file-menu-wrap{position:relative;display:inline-block}
+.file-menu-btn{
+  height:26px;padding:0 10px;border:1px solid #ddd;background:#fff;
+  border-radius:2px;font-family:Arial,sans-serif;font-size:11px;
+  color:var(--dark);cursor:pointer;display:flex;align-items:center;gap:5px;
+}
+.file-menu-btn:hover{background:#fce6f1;border-color:#f4a8cc;color:var(--rubine)}
+.file-menu-btn svg{width:12px;height:12px;fill:currentColor;flex-shrink:0}
+.file-dropdown{
+  display:none;position:absolute;top:30px;left:0;
+  background:#fff;border:1px solid #ddd;border-radius:3px;
+  box-shadow:0 4px 16px rgba(0,0,0,.14);
+  min-width:160px;z-index:300;
+  font-family:Arial,sans-serif;font-size:11px;
+  overflow:hidden;
+}
+.file-dropdown.open{display:block}
+.fd-item{
+  display:flex;align-items:center;gap:8px;padding:7px 14px;
+  cursor:pointer;color:var(--dark);white-space:nowrap;
+}
+.fd-item:hover{background:#fce6f1;color:var(--rubine)}
+.fd-item svg{width:13px;height:13px;fill:currentColor;flex-shrink:0;opacity:.7}
+.fd-sep{height:1px;background:#eee;margin:3px 0}
+.fd-item.danger:hover{background:#fff0ee;color:#c0392b}
+.colour-wrap{position:relative;display:inline-flex;align-items:center}
+.colour-btn{
+  width:26px;height:26px;border:1px solid #ddd;border-radius:2px;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+  background:transparent;padding:0;gap:0;flex-direction:column;
+}
+.colour-btn:hover{border-color:#f4a8cc}
+.colour-swatch{width:14px;height:4px;border-radius:1px;margin-top:1px}
+.colour-picker-panel{
+  display:none;position:absolute;top:32px;left:0;
+  background:#fff;border:1px solid #ddd;border-radius:3px;
+  box-shadow:0 4px 16px rgba(0,0,0,.14);
+  padding:8px;z-index:300;width:168px;
+}
+.colour-picker-panel.open{display:block}
+.cpanel-label{font-size:10px;color:var(--mid);font-family:Arial,sans-serif;
+  margin-bottom:5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.colour-grid{display:flex;flex-wrap:wrap;gap:3px;margin-bottom:6px}
+.colour-swatch-btn{
+  width:18px;height:18px;border-radius:2px;border:1px solid rgba(0,0,0,.1);
+  cursor:pointer;transition:transform .1s;
+}
+.colour-swatch-btn:hover{transform:scale(1.2);border-color:rgba(0,0,0,.3)}
+.colour-custom-row{display:flex;align-items:center;gap:6px;margin-top:4px}
+.colour-custom-row label{font-size:10px;color:var(--mid);font-family:Arial,sans-serif}
+.colour-custom-row input[type=color]{width:28px;height:22px;border:1px solid #ddd;
+  border-radius:2px;cursor:pointer;padding:1px;background:#fff}
+.tbsel{height:26px;padding:0 5px;border:1px solid #ddd;background:#fff;border-radius:2px;
+  font-family:Arial,sans-serif;font-size:11px;color:var(--dark);outline:none}
+.hints{margin-left:auto;display:flex;gap:6px;align-items:center}
+.hpill{font-size:10px;color:var(--mid);background:#fafafa;border:1px solid #ddd;
+  border-left:2px solid var(--rubine);padding:2px 7px;border-radius:2px}
+.hpill code{color:var(--purple);background:#eceaf8;padding:0 3px;border-radius:1px;font-size:10px}
+
+.page-wrap{margin:28px auto 40px;display:flex;gap:16px;align-items:flex-start}
+
+/* Paper — fixed A4 width on screen */
+.paper{
+  width:794px;flex-shrink:0;background:#fff;
+  box-shadow:0 6px 30px rgba(0,0,0,.22);
+}
+
+/* ── The repeating-header table ──────────────────────────
+   Key rules to stop the screen header from stretching:
+   - table-layout:fixed so columns don't auto-size wildly
+   - thead td has no height set — it sizes to its content
+   - The meta table inside uses fixed row heights
+   ──────────────────────────────────────────────────── */
+.pg-table{
+  width:100%;
+  border-collapse:collapse;
+  table-layout:fixed;
+}
+
+.pg-table thead td{
+  padding:16px 26px 8px;
+  /* Stop Chrome stretching the thead to fill the page */
+  height:auto;
+  vertical-align:top;
+}
+.pg-table tfoot td{
+  padding:5px 26px 12px;
+  text-align:right;font-size:9px;color:var(--mid);
+  border-top:1px solid #ccc;
+  vertical-align:top;
+}
+.pg-table tbody td{
+  padding:0 26px 24px;
+  vertical-align:top;
+}
+
+/* Page heading row */
+.pg-title-row{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:7px}
+.pg-title{font-size:16px;font-weight:700;color:var(--dark)}
+.pg-logo{display:flex;align-items:baseline;font-weight:900;font-size:28px;letter-spacing:.06em;user-select:none}
+.pg-logo .p1,.pg-logo .p2,.pg-logo .p4{color:var(--rubine)}
+.pg-logo .p3{color:var(--golden)}.pg-logo .p5,.pg-logo .p6{color:var(--purple)}
+
+/* Meta header — CSS Grid with explicit spans */
+.meta{
+  display:grid;
+  grid-template-columns:82px 1fr 90px 150px;
+  grid-template-rows:repeat(7,22px);
+  border-top:1px solid var(--bdr);
+  border-left:1px solid var(--bdr);
+  margin-bottom:8px;
+  font-size:11px;
+}
+.mc{
+  border-right:1px solid var(--bdr);
+  border-bottom:1px solid var(--bdr);
+  display:flex;
+  align-items:center;
+  padding:0 5px;
+  overflow:hidden;
+  font-size:11px;
+  color:var(--dark);
+  box-sizing:border-box;
+}
+/* Cells that visually merge two rows */
+.mc.span2{
+  grid-row:span 2;
+  align-items:center;
+}
+.mc input{
+  border:none;outline:none;background:transparent;
+  font-family:Arial,sans-serif;font-size:11px;color:var(--dark);
+  width:100%;height:100%;padding:0;
+  display:block;
+  align-self:stretch;
+  line-height:44px;
+}
+.mc input:focus{ background:rgba(229,0,118,.04); }
+
+/* Calc area */
+.calc-body{border:1px solid var(--bdr);position:relative}
+.calc-area{
+  display:block;width:100%;min-height:820px;padding:12px 14px;
+  outline:none;font-family:Arial,sans-serif;font-size:11px;
+  line-height:1.9;color:var(--dark);caret-color:var(--rubine);
+}
+.calc-area:empty::before{content:attr(data-placeholder);color:#bbb;pointer-events:none;font-style:italic}
+.calc-area h1{font-size:13px;font-weight:900;color:var(--rubine)}
+.calc-area h2{font-size:12px;font-weight:700;color:var(--purple)}
+.calc-area h3{font-size:11px;font-weight:700;color:var(--golden)}
+.calc-area blockquote{border-left:3px solid var(--rubine);padding-left:8px;color:var(--mid);font-style:italic}
+
+/* Page-break overlay */
+#overlay{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:10}
+.brk-line{position:absolute;left:0;right:0;border-top:2px dashed #aaa}
+.brk-label{position:absolute;right:10px;font-size:9px;color:#999;
+  background:#fff;padding:0 6px;border:1px dashed #ccc;border-radius:2px;
+  transform:translateY(-50%);user-select:none;font-family:Arial,sans-serif}
+.brk-shade{position:absolute;left:0;right:0;height:10px;
+  background:linear-gradient(to bottom,rgba(150,150,150,.15),transparent)}
+
+/* Chips */
+.var-def-chip{display:inline-flex;align-items:center;font-family:Arial,sans-serif;
+  font-size:11px;font-style:italic;color:var(--dark);user-select:none;cursor:default;white-space:nowrap}
+.vdc-val{cursor:pointer;border-bottom:1px dotted var(--mid)}
+.vdc-val:hover{color:var(--rubine);border-bottom-color:var(--rubine)}
+.vdc-edit-input{border:none;border-bottom:1px solid var(--rubine);outline:none;background:transparent;
+  font-family:Arial,sans-serif;font-size:11px;font-style:italic;color:var(--dark);width:60px;padding:0 2px}
+.formula-chip{display:inline;cursor:default;user-select:none;vertical-align:middle}
+.formula-chip .katex{font-size:1em}
+.formula-chip.error{color:var(--rubine);font-style:italic}
+
+/* ── Table styles ────────────────────────────────────── */
+.calc-table{
+  width:100%;border-collapse:collapse;
+  margin:6px 0;font-size:11px;
+  table-layout:fixed;
+}
+.calc-table td,.calc-table th{
+  border:1px solid var(--bdr);
+  padding:4px 7px;
+  min-width:40px;
+  vertical-align:top;
+  word-break:break-word;
+  outline:none;
+}
+.calc-table th{
+  background:#f0f0f0;font-weight:700;text-align:left;
+}
+.calc-table td:focus,.calc-table th:focus{
+  background:#fff8fe;outline:2px solid var(--rubine);outline-offset:-2px;
+}
+/* Prevent rows from splitting across pages in Chrome */
+.calc-table tr{
+  break-inside:avoid;
+  page-break-inside:avoid;
+}
+/* Col-resize handle */
+.calc-table td.col-resizing,.calc-table th.col-resizing{
+  user-select:none;
+}
+/* Table toolbar (appears above selected table) */
+.tbl-toolbar{
+  display:none;position:absolute;z-index:50;
+  background:#fff;border:1px solid #ddd;border-radius:3px;
+  box-shadow:0 2px 8px rgba(0,0,0,.12);
+  padding:3px 5px;gap:2px;align-items:center;
+  font-family:Arial,sans-serif;font-size:10px;
+}
+.tbl-toolbar.visible{display:flex;}
+.tbl-tb{
+  height:22px;padding:0 7px;border:1px solid transparent;
+  background:transparent;border-radius:2px;cursor:pointer;
+  font-family:Arial,sans-serif;font-size:10px;color:var(--dark);
+  white-space:nowrap;
+}
+.tbl-tb:hover{background:#fce6f1;color:var(--rubine);border-color:#f4a8cc;}
+.tbl-tb.danger:hover{background:#fff0ee;color:#c0392b;border-color:#f5b8b0;}
+.tbl-sep{width:1px;height:16px;background:#ddd;margin:0 2px;}
+
+/* Grid picker */
+.grid-picker-wrap{position:relative;display:inline-block;}
+.grid-picker{
+  display:none;position:absolute;top:30px;left:0;
+  background:#fff;border:1px solid #ddd;
+  box-shadow:0 4px 16px rgba(0,0,0,.14);
+  padding:8px;z-index:300;
+}
+.grid-picker.open{display:block;}
+.grid-cells{display:grid;grid-template-columns:repeat(8,18px);gap:2px;}
+.grid-cell{
+  width:18px;height:18px;border:1px solid #ddd;
+  background:#fafafa;cursor:pointer;border-radius:1px;
+}
+.grid-cell.hover{background:var(--rubine);border-color:var(--rubine);}
+.grid-label{font-size:10px;color:var(--mid);text-align:center;margin-top:5px;}
+
+/* ── Image handling ─────────────────────────────────── */
+.calc-img-wrap{
+  display:inline-block;position:relative;
+  line-height:0;user-select:none;
+  vertical-align:middle;
+  max-width:100%;
+}
+.calc-img-wrap img{
+  display:block;max-width:100%;height:auto;cursor:default;
+  outline:none;
+}
+.calc-img-wrap.selected img{
+  outline:2px solid var(--rubine);
+}
+/* Resize handle — bottom-right corner */
+.img-resize-handle{
+  display:none;position:absolute;bottom:-5px;right:-5px;
+  width:14px;height:14px;
+  background:var(--rubine);border:2px solid #fff;
+  border-radius:50%;cursor:se-resize;z-index:20;
+}
+.calc-img-wrap.selected .img-resize-handle{display:block;}
+/* Size label shown while resizing */
+.img-size-label{
+  display:none;position:absolute;bottom:4px;left:4px;
+  font-size:9px;background:rgba(0,0,0,.55);color:#fff;
+  padding:1px 5px;border-radius:2px;font-family:Arial,sans-serif;
+  pointer-events:none;
+}
+.calc-img-wrap.resizing .img-size-label{display:block;}
+
+/* Sidebar */
+.sidebar{width:170px;flex-shrink:0;background:#fff;border:1px solid #ddd;
+  border-top:3px solid var(--purple);box-shadow:0 2px 10px rgba(0,0,0,.08);
+  position:sticky;top:50px}
+.sh{background:#eceaf8;border-bottom:1px solid #b0a6dc;padding:7px 10px;
+  display:flex;align-items:center;gap:6px}
+.st{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--purple);flex:1}
+.sc{font-size:10px;font-weight:700;color:var(--purple);background:#fff;
+  padding:1px 6px;border-radius:8px;border:1px solid #b0a6dc}
+.sb{padding:6px;min-height:40px}
+.se{font-size:10px;color:var(--mid);text-align:center;padding:10px 6px;line-height:1.6}
+.se code{color:var(--purple);background:#eceaf8;padding:0 3px;border-radius:2px}
+.sr{display:flex;align-items:center;padding:3px 6px;border-bottom:1px solid #eee;font-style:italic}
+.sn{font-size:10px;color:var(--dark);flex:1}
+.sq{font-size:10px;color:var(--mid);margin:0 3px}
+.sv{font-size:10px;color:var(--dark);white-space:nowrap}
+.sref{border-top:1px solid #ddd;padding:8px 10px 10px}
+.sref-t{font-size:9px;color:var(--rubine);text-transform:uppercase;letter-spacing:.07em;font-weight:700;margin-bottom:5px}
+.sref-i{font-size:9.5px;color:var(--mid);padding:1px 0;font-family:"Courier New",monospace}
+.sref-i span{color:var(--dark)}
+
+/* ═══════════════════════════════════════════════════════
+   PRINT
+   
+   Strategy:
+   1. @page sets A4 with generous margins so content never
+      bleeds — use Default margins in Chrome print dialog.
+   2. thead repeats the header on every page (Chrome native).
+   3. tfoot follows content on the last page only — this is
+      a browser limitation. The footer is positioned with
+      position:running() in proper paged media, but Chrome
+      doesn't support that, so we accept tfoot-after-content.
+   4. Body padding-bottom leaves space so the last line of
+      content isn't immediately followed by the footer.
+   5. A pseudo-footer using position:fixed in print is the
+      only way to pin it to the bottom — but it requires
+      matching bottom margin in @page.  We use 20mm bottom
+      margin and a fixed footer 12mm tall at the bottom.
+   ═══════════════════════════════════════════════════════ */
+@media print{
+
+  /* 15mm sides, 14mm top, 22mm bottom — bottom is larger to
+     make room for the fixed footer (≈12mm) + gap (≈10mm)    */
+  @page{
+    size:A4 portrait;
+    margin:14mm 15mm 14mm 15mm;
+  }
+
+  /* Hide screen-only chrome */
+  /* Hide screen-only chrome */
+  .toolbar,.sidebar,#overlay,
+  .print-footer{display:none!important}
+
+  /* tfoot repeats on every page in Chrome */
+  .pg-table tfoot{display:table-footer-group}
+  .pg-table tfoot td{
+    padding:3mm 0 0 0;
+    text-align:right;
+    font-size:8pt;
+    color:#666;
+    border-top:0.5pt solid #aaa;
+  }
+
+  body{background:#fff!important;display:block;padding:0;margin:0}
+  .page-wrap{display:block;margin:0;padding:0}
+  .paper{width:100%;box-shadow:none}
+
+  /* Ensure browser sees proper table structure */
+  .pg-table{display:table;width:100%;table-layout:auto}
+  .pg-table thead{display:table-header-group}
+  .pg-table tbody{display:table-row-group}
+
+  /* Tighten print padding */
+  /* No bottom padding on thead — it reappears on every repeated page header
+     and creates a blank gap between the header and content on page 2+.      */
+  .pg-table thead td{padding:0}
+
+  .pg-table tbody td{padding:0;vertical-align:top;}
+  .calc-body{border:none !important;}
+
+  .calc-area{
+    min-height:unset!important;
+    padding:2mm 4mm 3mm;
+    font-size:10pt;
+    line-height:1.7;
+    border:0.5pt solid #888;
+    -webkit-box-decoration-break:clone;
+    box-decoration-break:clone;
+  }
+
+  /* Hide the screen-only fixed footer div */
+  .print-footer{display:none!important;}
+
+  /* Meta table — ensure it stays compact in print too */
+  .meta td{padding:2px 5px;}
+
+  .meta{ grid-template-rows:unset; }
+  .mc{ height:auto; min-height:22px; overflow:visible; white-space:normal; }
+  .mc.span2{ height:auto; min-height:44px; }
+  .mc input{ height:auto; line-height:1.4; }
+  /* Content tables: repeat header on each page, prevent mid-row breaks */
+  .calc-table{width:100%;}
+  .calc-table thead{display:table-header-group;}
+  .calc-table tbody{display:table-row-group;}
+  .calc-table tr{break-inside:avoid;page-break-inside:avoid;}
+  .calc-table td,.calc-table th{padding:2px 5px;font-size:10pt;}
+  .formula-chip,.var-def-chip{break-inside:avoid}
+  h1,h2,h3{break-after:avoid}
+}
+
+/* Hidden on screen, shown in print */
+.print-footer{display:none}
+</style>
+</head>
+<body>
+
+<!-- Toolbar -->
+<div class="toolbar">
+  <div class="logo"><span class="p1">P</span><span class="p2">E</span><span class="p3">R</span><span class="p4">E</span><span class="p5">G</span><span class="p6">A</span></div>
+  <div class="sep"></div>
+  <!-- File menu -->
+  <div class="file-menu-wrap" id="fileMenuWrap">
+    <button class="file-menu-btn" onclick="toggleFileMenu()">
+      <svg viewBox="0 0 14 14"><path d="M2 1h6l2 2v10H2V1zm4 0v3h3"/></svg>
+      File ▾
+    </button>
+    <div class="file-dropdown" id="fileDropdown">
+      <div class="fd-item" onclick="fileNew()">
+        <svg viewBox="0 0 14 14"><path d="M2 1h6l2 2v10H2V1zm4 0v3h3"/></svg>New
+      </div>
+      <div class="fd-item" onclick="fileOpen()">
+        <svg viewBox="0 0 14 14"><path d="M1 3h5l1 1.5H13V11H1V3z"/></svg>Open…
+      </div>
+      <div class="fd-sep"></div>
+      <div class="fd-item" onclick="fileSave()">
+        <svg viewBox="0 0 14 14"><path d="M1 1h9l3 3v9H1V1zm4 0v5h4V1M4 8h6v5H4V8"/></svg>Save
+      </div>
+      <div class="fd-item" onclick="fileSaveAs()">
+        <svg viewBox="0 0 14 14"><path d="M1 1h9l3 3v9H1V1zm4 0v5h4V1M4 8h6v5H4V8"/></svg>Save as…
+      </div>
+      <div class="fd-sep"></div>
+      <div class="fd-item" onclick="exportWord()">
+        <svg viewBox="0 0 14 14"><path d="M1 1h8l3 3v9H1V1zm3 5l1.5 4L7 6.5 8.5 10 10 6"/></svg>Export to Word…
+      </div>
+    </div>
+  </div>
+  <input type="file" id="openFileInput" accept=".perega" style="display:none" onchange="loadFile(this)">
+  <div class="sep"></div>
+  <select class="tbsel" id="blockFmt" onchange="applyBlock(this.value)">
+    <option value="p">Paragraph</option>
+    <option value="h1">Heading 1</option>
+    <option value="h2">Heading 2</option>
+    <option value="h3">Heading 3</option>
+    <option value="blockquote">Quote</option>
+  </select>
+  <div class="sep"></div>
+  <button class="tbtn" onclick="fmt('bold')"><b>B</b></button>
+  <button class="tbtn" onclick="fmt('italic')"><i>I</i></button>
+  <button class="tbtn" onclick="fmt('underline')"><u>U</u></button>
+  <div class="sep"></div>
+  <button class="tbtn" onclick="fmt('insertUnorderedList')" title="Bullets">
+    <svg viewBox="0 0 16 16"><circle cx="2.5" cy="4" r="1.2"/><rect x="5" y="3.3" width="9" height="1.4"/><circle cx="2.5" cy="8" r="1.2"/><rect x="5" y="7.3" width="9" height="1.4"/><circle cx="2.5" cy="12" r="1.2"/><rect x="5" y="11.3" width="9" height="1.4"/></svg>
+  </button>
+  <button class="tbtn" onclick="fmt('insertOrderedList')" title="Numbered">
+    <svg viewBox="0 0 16 16"><text x="1" y="5.5" font-size="5" font-family="Arial" fill="currentColor">1.</text><rect x="6" y="3.5" width="8" height="1.4"/><text x="1" y="10" font-size="5" font-family="Arial" fill="currentColor">2.</text><rect x="6" y="8" width="8" height="1.4"/><text x="1" y="14.5" font-size="5" font-family="Arial" fill="currentColor">3.</text><rect x="6" y="12.5" width="8" height="1.4"/></svg>
+  </button>
+  <div class="sep"></div>
+  <button class="tbtn" onclick="fmt('justifyLeft')">
+    <svg viewBox="0 0 16 16"><rect x="1" y="3" width="14" height="1.5"/><rect x="1" y="6.5" width="9" height="1.5"/><rect x="1" y="10" width="14" height="1.5"/><rect x="1" y="13.5" width="7" height="1.5"/></svg>
+  </button>
+  <button class="tbtn" onclick="fmt('justifyFull')">
+    <svg viewBox="0 0 16 16"><rect x="1" y="3" width="14" height="1.5"/><rect x="1" y="6.5" width="14" height="1.5"/><rect x="1" y="10" width="14" height="1.5"/><rect x="1" y="13.5" width="14" height="1.5"/></svg>
+  </button>
+  <div class="sep"></div>
+  <button class="tbtn" onclick="triggerImageUpload()" title="Insert image">
+    <svg viewBox="0 0 16 16"><rect x="1" y="2" width="14" height="12" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="5.5" cy="6" r="1.2"/><path d="M1 11l3.5-3.5L7 10l2.5-2.5L15 11" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+    Image
+  </button>
+  <input type="file" id="imgFileInput" accept="image/*" style="display:none" onchange="insertImageFromFile(this)">
+  <div class="grid-picker-wrap">
+    <button class="tbtn" id="insertTableBtn" title="Insert table" onclick="toggleGridPicker()">
+      <svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/><line x1="1" y1="5.5" x2="15" y2="5.5" stroke="currentColor" stroke-width="1"/><line x1="1" y1="10" x2="15" y2="10" stroke="currentColor" stroke-width="1"/><line x1="5.5" y1="1" x2="5.5" y2="15" stroke="currentColor" stroke-width="1"/><line x1="10" y1="1" x2="10" y2="15" stroke="currentColor" stroke-width="1"/></svg>
+      Table
+    </button>
+    <div class="grid-picker" id="gridPicker">
+      <div class="grid-cells" id="gridCells"></div>
+      <div class="grid-label" id="gridLabel">0 × 0</div>
+    </div>
+  </div>
+  <div class="sep"></div>
+  <!-- Font size -->
+  <select class="tbsel-sm" id="fontSizeSel" title="Font size" onchange="applyFontSize(this.value)">
+    <option value="">Size</option>
+    <option value="8pt">8</option>
+    <option value="9pt">9</option>
+    <option value="10pt">10</option>
+    <option value="11pt">11</option>
+    <option value="12pt">12</option>
+    <option value="14pt">14</option>
+    <option value="16pt">16</option>
+    <option value="18pt">18</option>
+    <option value="24pt">24</option>
+    <option value="36pt">36</option>
+  </select>
+  <!-- Text colour -->
+  <div class="colour-wrap" id="textColourWrap">
+    <button class="colour-btn tbtn" id="textColourBtn" title="Text colour" onclick="toggleColourPanel('text')">
+      <svg viewBox="0 0 14 14" style="width:13px;height:13px;fill:currentColor"><path d="M5.5 1L1 13h2l1-3h5l1 3h2L7.5 1h-2zm-.8 7L7 3.8 9.3 8H4.7z"/></svg>
+      <span class="colour-swatch" id="textColourSwatch" style="background:#505050"></span>
+    </button>
+    <div class="colour-picker-panel" id="textColourPanel">
+      <div class="cpanel-label">Text colour</div>
+      <div class="colour-grid" id="textColourGrid"></div>
+      <div class="colour-custom-row">
+        <label>Custom</label>
+        <input type="color" id="textColourCustom" value="#505050" oninput="applyTextColour(this.value,true)">
+      </div>
+    </div>
+  </div>
+  <!-- Highlight colour -->
+  <div class="colour-wrap" id="hlColourWrap">
+    <button class="colour-btn tbtn" id="hlColourBtn" title="Highlight" onclick="toggleColourPanel('hl')">
+      <svg viewBox="0 0 14 14" style="width:13px;height:13px;fill:currentColor"><path d="M9 1L5 5l-3 7 1 1 7-3 4-4-5-5zm-5.5 9.5l1.5-3.5 2 2-3.5 1.5z"/></svg>
+      <span class="colour-swatch" id="hlColourSwatch" style="background:#fff8c5"></span>
+    </button>
+    <div class="colour-picker-panel" id="hlColourPanel">
+      <div class="cpanel-label">Highlight</div>
+      <div class="colour-grid" id="hlColourGrid"></div>
+      <div class="colour-custom-row">
+        <label>Custom</label>
+        <input type="color" id="hlColourCustom" value="#fff8c5" oninput="applyHighlight(this.value,true)">
+      </div>
+    </div>
+  </div>
+  <div class="sep"></div>
+  <button class="tbtn print-btn" onclick="printWithWarning()">
+    <svg viewBox="0 0 16 16" style="width:13px;height:13px"><path d="M4 1.5h8v3.5H4V1.5zm-2 4h12c.55 0 1 .45 1 1v4.5c0 .55-.45 1-1 1H13v3H3v-3H2c-.55 0-1-.45-1-1V6.5c0-.55.45-1 1-1zm1 1.5c-.41 0-.75.34-.75.75s.34.75.75.75.75-.34.75-.75S3.41 7 3 7zM5 11.5h6V14H5v-2.5z" fill="white"/></svg>
+    Print
+  </button>
+  <div class="hints">
+    <div class="hpill"><code>x = 42</code> + Enter → variable</div>
+    <div class="hpill"><code>=x^2+3</code> + Enter → formula</div>
+  </div>
+</div>
+
+<!-- Fixed footer: shown only in @media print via CSS -->
+<div class="print-footer">T4 Rev 31.03.23</div>
+
+<div class="page-wrap">
+  <div class="paper">
+
+    <table class="pg-table">
+
+      <!-- THEAD: repeats on every printed page in Chrome -->
+      <thead>
+        <tr>
+          <td>
+            <div class="pg-title-row">
+              <div class="pg-title">Calculations</div>
+              <div class="pg-logo"><span class="p1">P</span><span class="p2">E</span><span class="p3">R</span><span class="p4">E</span><span class="p5">G</span><span class="p6">A</span></div>
+            </div>
+            <!-- Meta header — CSS Grid, left pairs span 2 rows -->
+            <div class="meta">
+              <!-- Project: spans rows 1–2 -->
+              <div class="mc span2">Project:</div>
+              <div class="mc span2"><input type="text" id="m-project" placeholder=""></div>
+              <div class="mc">Project no:</div>
+              <div class="mc"><input type="text" id="m-projno" placeholder=""></div>
+              <!-- Row 2 right side -->
+              <div class="mc">Date:</div>
+              <div class="mc"><input type="text" id="m-date" placeholder=""></div>
+              <!-- Description: spans rows 3–4 -->
+              <div class="mc span2">Description:</div>
+              <div class="mc span2"><input type="text" id="m-desc" placeholder=""></div>
+              <div class="mc">Sheet:</div>
+              <div class="mc"><input type="text" id="m-sheet" placeholder=""></div>
+              <!-- Row 4 right side -->
+              <div class="mc">Originator:</div>
+              <div class="mc"><input type="text" id="m-orig" placeholder=""></div>
+              <!-- Deliverable No.: spans rows 5–6 -->
+              <div class="mc span2">Deliverable No.:</div>
+              <div class="mc span2"><input type="text" id="m-deliv" placeholder=""></div>
+              <div class="mc">Checked:</div>
+              <div class="mc"><input type="text" id="m-checked" placeholder=""></div>
+              <!-- Row 6 right side -->
+              <div class="mc">Suitability:</div>
+              <div class="mc"><input type="text" id="m-suit" placeholder=""></div>
+              <!-- Row 7 — empty left, Revision right -->
+              <div class="mc span1"></div>
+              <div class="mc span1"></div>
+              <div class="mc">Revision:</div>
+              <div class="mc"><input type="text" id="m-rev" placeholder=""></div>
+            </div>
+          </td>
+        </tr>
+      </thead>
+
+      <!-- TFOOT: shown on screen only (hidden in print — replaced by position:fixed footer) -->
+      <tfoot>
+        <tr>
+          <td>T4 Rev 31.03.23</td>
+        </tr>
+      </tfoot>
+
+      <!-- TBODY: the editable content -->
+      <tbody>
+        <tr>
+          <td>
+            <div class="calc-body">
+              <div id="overlay"></div>
+              <div id="editor" class="calc-area" contenteditable="true" spellcheck="true"
+                data-placeholder="Begin calculations… type  x = 42  then Enter to define a variable,  =x^2+3  then Enter for a formula."></div>
+            </div>
+          </td>
+        </tr>
+      </tbody>
+
+    </table>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sh"><span class="st">Variables</span><span class="sc" id="vsCount">0</span></div>
+    <div class="sb" id="vsList">
+      <div class="se" id="vsEmpty">Type <code>x = 42</code><br>then Enter to define</div>
+    </div>
+    <div class="sref">
+      <div class="sref-t">Functions</div>
+      <div class="sref-i"><span>=SUM(a,b,…)</span></div>
+      <div class="sref-i"><span>=AVG(a,b,…)</span></div>
+      <div class="sref-i"><span>=MIN / MAX(…)</span></div>
+      <div class="sref-i"><span>=SQRT(x)</span></div>
+      <div class="sref-i"><span>=ABS(x)</span></div>
+      <div class="sref-i"><span>=ROUND(x,d)</span></div>
+      <div class="sref-i"><span>=x^y or POW(x,y)</span></div>
+      <div class="sref-i"><span>=IF(cond,t,f)</span></div>
+      <div class="sref-i"><span>=LOG(x)/LOG(x,b)</span></div>
+      <div class="sref-i"><span>=PERCENT(p,w)</span></div>
+      <div class="sref-i"><span>=PI() / E()</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+
+
+
+
+
+
+const editor = document.getElementById('editor');
+let vars = {};
+
+// ── Variable store ─────────────────────────────────────────
+function rebuildVars() {
+  vars = {};
+  // Two-pass: first collect plain values, then evaluate expressions in order
+  // so earlier variables are available to later ones.
+  editor.querySelectorAll('.var-def-chip').forEach(chip => {
+    const name = chip.dataset.varName;
+    const expr = chip.dataset.varExpr;
+    if (!name) return;
+    if (expr) {
+      // Recalculate expression using currently known vars
+      try {
+        const newVal = parseFloat(evalFormula(expr, vars));
+        if (!isNaN(newVal)) {
+          chip.dataset.varVal = String(newVal);
+          renderVarChipContent(chip);
+          vars[name] = newVal;
+        }
+      } catch(e) {
+        // expression references not-yet-defined var — use last known value
+        const fallback = parseFloat(chip.dataset.varVal);
+        if (!isNaN(fallback)) vars[name] = fallback;
+      }
+    } else {
+      const val = parseFloat(chip.dataset.varVal);
+      if (!isNaN(val)) vars[name] = val;
+    }
+  });
+  recalcAll();
+  renderSidebar();
+}
+
+function renderSidebar() {
+  const list  = document.getElementById('vsList');
+  const empty = document.getElementById('vsEmpty');
+  const count = document.getElementById('vsCount');
+  const names = Object.keys(vars);
+  count.textContent = names.length;
+  empty.style.display = names.length === 0 ? '' : 'none';
+  list.querySelectorAll('.vs-row').forEach(r => r.remove());
+  names.forEach(name => {
+    const row = document.createElement('div');
+    row.className = 'vs-row';
+    row.innerHTML =
+      `<span class="vs-name">${name}</span>` +
+      `<span class="vs-eq">=</span>` +
+      `<span class="vs-val">${fmtNum(vars[name])}</span>`;
+    list.appendChild(row);
+  });
+}
+
+// ── Formula engine ─────────────────────────────────────────
+const FUNS = {
+  SUM:     (...a) => a.flat().reduce((s,x)=>s+x,0),
+  AVG:     (...a) => { const f=a.flat(); return f.reduce((s,x)=>s+x,0)/f.length; },
+  MIN:     (...a) => Math.min(...a.flat()),
+  MAX:     (...a) => Math.max(...a.flat()),
+  COUNT:   (...a) => a.flat().length,
+  SQRT:    x => Math.sqrt(x),
+  ABS:     x => Math.abs(x),
+  ROUND:   (x,d=0) => parseFloat(x.toFixed(d)),
+  POW:     (x,y) => Math.pow(x,y),
+  IF:      (c,t,f) => c ? t : f,
+  PI:      () => Math.PI,
+  E:       () => Math.E,
+  FLOOR:   x => Math.floor(x),
+  CEIL:    x => Math.ceil(x),
+  MOD:     (a,b) => a%b,
+  LOG:     (x,b) => b ? Math.log(x)/Math.log(b) : Math.log(x),
+  PERCENT: (p,w) => (p/w)*100,
+};
+
+function evalFormula(raw, variables) {
+  let expr = raw.trim();
+  // Normalise function names to uppercase so sqrt(), Sqrt(), SQRT() all work.
+  // Only uppercases identifiers immediately followed by '(' that aren't variable names.
+  const varNames = new Set(Object.keys(variables));
+  expr = expr.replace(/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*(?=\()/g, (m, name) => {
+    const up = name.toUpperCase();
+    // Don't uppercase if it's a known variable name
+    if (varNames.has(name)) return m;
+    return FUNS[up] ? up + m.slice(name.length) : m;
+  });
+  expr = expr.replace(/([a-zA-Z0-9_)]+)\s*\^\s*([a-zA-Z0-9_(]+)/g, 'Math.pow($1,$2)');
+  const vnames = Object.keys(variables).sort((a,b) => b.length - a.length);
+  for (const vn of vnames)
+    expr = expr.replace(new RegExp(`\\b${vn}\\b`, 'g'), `(${variables[vn]})`);
+  let safe = expr.replace(/\b([A-Z_]+)\s*\(/g, (_,nm) => {
+    if (FUNS[nm]) return `__F.${nm}(`;
+    throw new Error(`Unknown: ${nm}`);
+  });
+  const result = new Function('__F', `"use strict"; return (${safe});`)(FUNS);
+  if (typeof result === 'boolean') return result ? 'TRUE' : 'FALSE';
+  if (typeof result === 'number') {
+    if (!isFinite(result)) throw new Error('Math error');
+    return fmtNum(result);
+  }
+  return String(result);
+}
+
+function fmtNum(n) {
+  const r = Math.round(n * 1e10) / 1e10;
+  if (Number.isInteger(r)) return r.toLocaleString('en-GB');
+  return parseFloat(r.toFixed(8)).toString();
+}
+
+function usedVars(formula) {
+  return Object.keys(vars).filter(n => new RegExp(`\\b${n}\\b`).test(formula));
+}
+
+// ── LaTeX tokeniser + parser ────────────────────────────────
+function tokenize(expr) {
+  const toks = [];
+  let i = 0;
+  while (i < expr.length) {
+    if (/\s/.test(expr[i])) { i++; continue; }
+    if (/\d/.test(expr[i]) || (expr[i] === '.' && i+1 < expr.length && /\d/.test(expr[i+1]))) {
+      let n = '';
+      while (i < expr.length && /[\d.]/.test(expr[i])) n += expr[i++];
+      toks.push({ t: 'num', v: n });
+    } else if (/[a-zA-Z_]/.test(expr[i])) {
+      let s = '';
+      while (i < expr.length && /[a-zA-Z0-9_]/.test(expr[i])) s += expr[i++];
+      toks.push({ t: 'id', v: s });
+    } else {
+      toks.push({ t: expr[i], v: expr[i] }); i++;
+    }
+  }
+  toks.push({ t: 'EOF' });
+  return toks;
+}
+
+function nameToLatex(name) {
+  const up = name.toUpperCase();
+  if (up === 'PI') return '\\pi';
+  if (up === 'E')  return 'e';
+  const idx = name.indexOf('_');
+  if (idx === -1) {
+    return name.length === 1 ? name : '\\text{' + name + '}';
+  }
+  const base = name.slice(0, idx);
+  const sub  = name.slice(idx + 1);
+  const baseL = base.length === 1 ? base : '\\text{' + base + '}';
+  const subL  = nameToLatex(sub);
+  return baseL + '_{' + subL + '}';
+}
+
+function toLatex(formula) {
+  // Normalise function names to uppercase before tokenising
+  formula = formula.replace(/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*(?=\()/g, (m, name) => {
+    const up = name.toUpperCase();
+    return up + m.slice(name.length);
+  });
+  const toks = tokenize(formula);
+  let pos = 0;
+  const peek = () => toks[pos];
+  const consume = () => toks[pos++];
+  const eat = (t) => { if (peek().t === t) { consume(); return true; } return false; };
+
+  function latexIdent(name) { return nameToLatex(name); }
+
+  function latexFunc(name, args) {
+    const up = name.toUpperCase();
+    switch (up) {
+      case 'SQRT':    return '\\sqrt{' + args[0] + '}';
+      case 'ABS':     return '\\left|' + args[0] + '\\right|';
+      case 'PI':      return '\\pi';
+      case 'E':       return 'e';
+      case 'POW':     return '{' + args[0] + '}^{' + stripParens(args[1]) + '}';
+      case 'LOG':     return args[1]
+                        ? '\\log_{' + args[1] + '}\\!\\left(' + args[0] + '\\right)'
+                        : '\\ln\\!\\left(' + args[0] + '\\right)';
+      case 'FLOOR':   return '\\lfloor ' + args[0] + ' \\rfloor';
+      case 'CEIL':    return '\\lceil ' + args[0] + ' \\rceil';
+      case 'MOD':     return args[0] + ' \\bmod ' + args[1];
+      case 'PERCENT': return '\\dfrac{' + stripParens(args[0]) + '}{' + stripParens(args[1]) + '} \\times 100';
+      case 'MIN':     return '\\min\\!\\left(' + args.join(', ') + '\\right)';
+      case 'MAX':     return '\\max\\!\\left(' + args.join(', ') + '\\right)';
+      case 'SUM':     return args.join(' + ');
+      case 'AVG':     return '\\dfrac{' + args.join(' + ') + '}{' + args.length + '}';
+      case 'IF':      return '\\begin{cases}' + args[1] + ' & \\text{if } ' + args[0] + ' \\\\ ' + (args[2]||'0') + ' & \\text{otherwise}\\end{cases}';
+      case 'ROUND':   return '\\text{round}\\!\\left(' + args.join(', ') + '\\right)';
+      default:        return '\\operatorname{' + name.toLowerCase() + '}\\!\\left(' + args.join(', ') + '\\right)';
+    }
+  }
+
+  function stripParens(s) {
+    if (s && s.startsWith('\\left(') && s.endsWith('\\right)')) return s.slice(6, -7);
+    return s;
+  }
+
+  function parseExpr() {
+    let left = parseTerm();
+    while (peek().t === '+' || peek().t === '-') {
+      const op = consume().t;
+      const right = parseTerm();
+      left = left + (op === '+' ? ' + ' : ' - ') + right;
+    }
+    return left;
+  }
+
+  function parseTerm() {
+    let left = parsePower();
+    while (peek().t === '*' || peek().t === '/') {
+      const op = consume().t;
+      const right = parsePower();
+      if (op === '/') {
+        left = '\\dfrac{' + stripParens(left) + '}{' + stripParens(right) + '}';
+      } else {
+        left = left + ' \\cdot ' + right;
+      }
+    }
+    return left;
+  }
+
+  function parsePower() {
+    let base = parseUnary();
+    if (peek().t === '^') {
+      consume();
+      const exp = parseUnary();
+      return '{' + base + '}^{' + stripParens(exp) + '}';
+    }
+    return base;
+  }
+
+  function parseUnary() {
+    if (peek().t === '-') { consume(); return '-' + parsePrimary(); }
+    if (peek().t === '+') { consume(); return parsePrimary(); }
+    return parsePrimary();
+  }
+
+  function parsePrimary() {
+    const tok = peek();
+    if (tok.t === '(') {
+      consume();
+      const inner = parseExpr();
+      eat(')');
+      return '\\left(' + inner + '\\right)';
+    }
+    if (tok.t === 'num') { consume(); return tok.v; }
+    if (tok.t === 'id') {
+      consume();
+      if (peek().t === '(') {
+        consume();
+        const args = [];
+        if (peek().t !== ')') {
+          args.push(parseExpr());
+          while (peek().t === ',') { consume(); args.push(parseExpr()); }
+        }
+        eat(')');
+        return latexFunc(tok.v.toUpperCase(), args);
+      }
+      return latexIdent(tok.v);
+    }
+    consume();
+    return tok.v || '';
+  }
+
+  try { return parseExpr(); }
+  catch(e) { return formula; }
+}
+
+function numToLatex(s) {
+  const n = parseFloat(s.replace(/,/g, ''));
+  if (isNaN(n)) return s;
+  if (Number.isInteger(n) && Math.abs(n) >= 10000)
+    return n.toLocaleString('en-GB').replace(/,/g, '{,}');
+  return s;
+}
+
+// ── Chip builders ──────────────────────────────────────────
+// Render a variable chip's content (name, optional LaTeX expr, result value)
+function renderVarChipContent(chip) {
+  const name  = chip.dataset.varName;
+  const val   = parseFloat(chip.dataset.varVal);
+  const expr  = chip.dataset.varExpr;
+
+  let inner = '';
+
+  if (expr) {
+    // Render:  name = <LaTeX expression> = value
+    try {
+      const latexExpr = toLatex(expr);
+      const latexVal  = numToLatex(fmtNum(val));
+      const nameLatex = nameToLatex(name);
+      inner = katex.renderToString(
+        nameLatex + ' = ' + latexExpr + ' = ' + latexVal,
+        { displayMode: false, throwOnError: false, output: 'html' }
+      );
+    } catch(e) {
+      inner = `<span class="vdc-name">${name} = ${expr} = </span><span class="vdc-val">${fmtNum(val)}</span>`;
+    }
+    chip.innerHTML = inner;
+    chip.title = `${name} = ${expr} = ${fmtNum(val)}`;
+  } else {
+    // Render:  name = <editable value>
+    try {
+      const nameLatex = nameToLatex(name);
+      const katexName = katex.renderToString(
+        nameLatex + ' = ',
+        { displayMode: false, throwOnError: false, output: 'html' }
+      );
+      chip.innerHTML =
+        `<span class="vdc-name">${katexName}</span>` +
+        `<span class="vdc-val">${fmtNum(val)}</span>`;
+    } catch(e) {
+      chip.innerHTML =
+        `<span class="vdc-name">${name} = </span>` +
+        `<span class="vdc-val">${fmtNum(val)}</span>`;
+    }
+    chip.title = `Variable "${name}" = ${fmtNum(val)} — click value to edit`;
+    chip.querySelector('.vdc-val').addEventListener('click', () => startEditVarChip(chip));
+  }
+}
+
+function makeVarDefChip(name, val, expr) {
+  const chip = document.createElement('span');
+  chip.contentEditable = 'false';
+  chip.className = 'var-def-chip';
+  chip.dataset.varName = name;
+  chip.dataset.varVal  = String(val);
+  if (expr && expr.trim() !== String(val)) chip.dataset.varExpr = expr.trim();
+  renderVarChipContent(chip);
+  return chip;
+}
+
+function startEditVarChip(chip) {
+  if (chip.querySelector('.vdc-edit-input')) return;
+  chip.classList.add('editing-val');
+  const valSpan = chip.querySelector('.vdc-val');
+  valSpan.style.display = 'none';
+  const inp = document.createElement('input');
+  inp.type = 'text'; inp.className = 'vdc-edit-input';
+  inp.value = chip.dataset.varVal;
+  chip.appendChild(inp);
+  inp.focus(); inp.select();
+  function commit() {
+    const newVal = parseFloat(inp.value);
+    if (!isNaN(newVal)) {
+      chip.dataset.varVal = newVal;
+      valSpan.textContent = fmtNum(newVal);
+    }
+    valSpan.style.display = '';
+    chip.classList.remove('editing-val');
+    inp.remove();
+    rebuildVars();
+  }
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') { valSpan.style.display = ''; chip.classList.remove('editing-val'); inp.remove(); }
+    e.stopPropagation();
+  });
+  inp.addEventListener('blur', commit);
+}
+
+function makeFormulaChip(formula, result, isError) {
+  const chip = document.createElement('span');
+  chip.contentEditable = 'false';
+  chip.className = 'formula-chip' + (isError ? ' error' : '');
+  chip.dataset.formula = formula;
+  setFormulaContent(chip, formula, result, isError);
+  return chip;
+}
+
+function setFormulaContent(chip, formula, result, isError) {
+  if (isError) {
+    chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">=${formula} — ${result}</span>`;
+    chip.title = `Error: ${result}`;
+    return;
+  }
+  try {
+    const lhs = toLatex(formula);
+    const rhs = numToLatex(result);
+    chip.innerHTML = katex.renderToString(lhs + ' = ' + rhs, {
+      displayMode: false, throwOnError: false, output: 'html'
+    });
+  } catch(e) {
+    chip.innerHTML = `<span style="font-style:italic">=${formula} = ${result}</span>`;
+  }
+  chip.title = `=${formula} = ${result}`;
+}
+
+function recalcAll() {
+  editor.querySelectorAll('.formula-chip').forEach(chip => {
+    const formula = chip.dataset.formula;
+    if (!formula) return;
+    let result, isError = false;
+    try { result = evalFormula(formula, vars); }
+    catch(e) { result = e.message || 'Error'; isError = true; }
+    chip.className = 'formula-chip' + (isError ? ' error' : '');
+    setFormulaContent(chip, formula, result, isError);
+  });
+  updateStatus();
+}
+
+// ── Input handling ─────────────────────────────────────────
+// Match:  name = <any expression>
+// The expression part can be a number OR a formula using other variables/functions.
+// We require the name to not start with a digit, and the = to not be == or >=/<= etc.
+const VAR_RE = /^([a-zA-Z][a-zA-Z0-9_]*)\s*=(?!=)\s*(.+)$/;
+let formulaBuffer = null;
+
+editor.addEventListener('keydown', e => {
+  if (formulaBuffer !== null) {
+    if (e.key === 'Enter') { e.preventDefault(); commitFormula(); return; }
+    if (e.key === 'Escape') { e.preventDefault(); cancelFormula(); return; }
+    return;
+  }
+  if (e.key === 'Enter') {
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    const node = range.startContainer;
+    if (node.nodeType !== Node.TEXT_NODE) return;
+    const fullText = node.textContent.trim();
+    const m = fullText.match(VAR_RE);
+    if (m) {
+      e.preventDefault();
+      const exprStr = m[2].trim();
+      // Try to evaluate the expression — it may reference existing vars
+      let val;
+      try {
+        val = parseFloat(evalFormula(exprStr, vars));
+        if (isNaN(val)) throw new Error('Result is not a number');
+      } catch(err) {
+        // Not a valid expression — let Enter create a normal newline
+        return;
+      }
+      commitVarDef(node, m[1], val, exprStr);
+    }
+  }
+});
+
+editor.addEventListener('input', () => {
+  if (formulaBuffer !== null) {
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    const node = sel.getRangeAt(0).startContainer;
+    if (node.nodeType !== Node.TEXT_NODE) { cancelFormula(); return; }
+    const text = node.textContent;
+    const eqIdx = text.lastIndexOf('=');
+    if (eqIdx === -1) { cancelFormula(); return; }
+    formulaBuffer = text.slice(eqIdx + 1);
+  } else {
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    const node = range.startContainer;
+    if (node.nodeType !== Node.TEXT_NODE) return;
+    const text = node.textContent;
+    const pos = range.startOffset;
+    if (text[pos - 1] === '=') {
+      const before = text[pos - 2];
+      if (pos <= 1 || before === ' ' || before === '\n' || before === '\u00A0')
+        formulaBuffer = '';
+    }
+  }
+});
+
+function commitVarDef(textNode, name, val, expr) {
+  const parent = textNode.parentNode;
+  const frag = document.createDocumentFragment();
+  frag.appendChild(makeVarDefChip(name, val, expr));
+  const spacer = document.createTextNode('\u00A0');
+  frag.appendChild(spacer);
+  parent.replaceChild(frag, textNode);
+  const r = document.createRange();
+  r.setStartAfter(spacer); r.collapse(true);
+  const sel = window.getSelection();
+  sel.removeAllRanges(); sel.addRange(r);
+  rebuildVars();
+}
+
+function commitFormula() {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) { cancelFormula(); return; }
+  const range = sel.getRangeAt(0);
+  const node = range.startContainer;
+  if (node.nodeType !== Node.TEXT_NODE) { cancelFormula(); return; }
+  const text = node.textContent;
+  const eqIdx = text.lastIndexOf('=');
+  if (eqIdx === -1) { cancelFormula(); return; }
+  const formula = text.slice(eqIdx + 1).trim();
+  if (!formula) { cancelFormula(); return; }
+  let result, isError = false;
+  try { result = evalFormula(formula, vars); }
+  catch(e) { result = e.message || 'Error'; isError = true; }
+  const before = text.slice(0, eqIdx);
+  const parent = node.parentNode;
+  const frag = document.createDocumentFragment();
+  if (before) frag.appendChild(document.createTextNode(before));
+  frag.appendChild(makeFormulaChip(formula, result, isError));
+  const spacer = document.createTextNode('\u00A0');
+  frag.appendChild(spacer);
+  parent.replaceChild(frag, node);
+  const r = document.createRange();
+  r.setStartAfter(spacer); r.collapse(true);
+  sel.removeAllRanges(); sel.addRange(r);
+  formulaBuffer = null;
+}
+
+function cancelFormula() { formulaBuffer = null; }
+function fmt(cmd) { editor.focus(); document.execCommand(cmd, false, null); }
+function applyBlock(tag) { editor.focus(); document.execCommand('formatBlock', false, tag); }
+
+function updateStatus() {}
+
+editor.addEventListener('keyup', () => {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return;
+  let node = sel.getRangeAt(0).commonAncestorContainer;
+  while (node && node !== editor) {
+    const tag = node.nodeName.toLowerCase();
+    if (['h1','h2','h3','blockquote','p'].includes(tag)) {
+      document.getElementById('blockFmt').value = tag; break;
+    }
+    node = node.parentNode;
+  }
+});
+
+// Set today's date
+document.getElementById('m-date').value = new Date().toLocaleDateString('en-GB');
+
+rebuildVars();
+
+// Set today's date
+document.getElementById('m-date').value = new Date().toLocaleDateString('en-GB');
+rebuildVars();
+
+// ── Init ─────────────────────────────────────────────────────
+document.getElementById('m-date').value = new Date().toLocaleDateString('en-GB');
+rebuildVars();
+
+// ── Block format toolbar sync ─────────────────────────────────
+editor.addEventListener('keyup', () => {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return;
+  let node = sel.getRangeAt(0).commonAncestorContainer;
+  while (node && node !== editor) {
+    const tag = node.nodeName.toLowerCase();
+    if (['h1','h2','h3','blockquote','p'].includes(tag)) {
+      document.getElementById('blockFmt').value = tag; break;
+    }
+    node = node.parentNode;
+  }
+});
+
+// ── Shared page geometry ────────────────────────────────────────
+// Single source of truth used by BOTH the screen overlay and the
+// beforeprint spacer — they must agree or the spacer will be wrong.
+
+function mmToPx(mm){ return mm * 96 / 25.4; }
+function pxToMm(px){ return px * 25.4 / 96; }
+
+// @page values — must match @page rule in CSS exactly
+const PAGE_H_MM   = 297;
+const MARGIN_T_MM = 14;
+const MARGIN_B_MM = 14;
+
+function getPageGeometry() {
+  const paperEl = document.querySelector('.paper');
+  const theadEl = document.querySelector('.pg-table thead');
+  const tfootEl = document.querySelector('.pg-table tfoot');
+
+  const paperW   = paperEl ? paperEl.offsetWidth : 794;
+  const pxPerMm  = paperW / 210;
+
+  // Screen thead padding: 16px top + 8px bottom = 24px screen-only vertical padding
+  // Print thead  padding: 0 top  + 6mm bottom
+  // Derive print thead from screen measurement:
+  const THEAD_SCREEN_VERT_PX = 24;          // 16px top + 8px bottom (screen CSS)
+  const THEAD_PRINT_BOTTOM_MM = 6;          // print CSS: padding:0 0 6mm 0
+  const theadContentPx = theadEl
+    ? Math.max(0, theadEl.offsetHeight - THEAD_SCREEN_VERT_PX)
+    : 186;
+  const theadPrintPx = theadContentPx + (THEAD_PRINT_BOTTOM_MM * pxPerMm);
+  const theadMm      = theadPrintPx / pxPerMm;
+
+  // Screen tfoot padding: 5px top + 12px bottom = 17px screen-only vertical padding
+  // Print tfoot  padding: 3mm top only
+  const TFOOT_SCREEN_VERT_PX = 17;
+  const TFOOT_PRINT_TOP_MM   = 3;
+  const tfootContentPx = tfootEl
+    ? Math.max(0, tfootEl.offsetHeight - TFOOT_SCREEN_VERT_PX)
+    : 11;
+  const tfootPrintPx = tfootContentPx + (TFOOT_PRINT_TOP_MM * pxPerMm);
+  const tfootMm      = tfootPrintPx / pxPerMm;
+
+  const availMm  = PAGE_H_MM - MARGIN_T_MM - MARGIN_B_MM - theadMm - tfootMm;
+  const availPx  = availMm * pxPerMm;
+
+  return { availMm, availPx, pxPerMm, theadMm, tfootMm };
+}
+
+function updateBreaks() {
+  const overlay  = document.getElementById('overlay');
+
+  // Screen overlay uses RAW screen measurements (not print-corrected),
+  // because on screen the thead/tfoot have their screen padding applied.
+  const paperEl  = document.querySelector('.paper');
+  const theadEl  = document.querySelector('.pg-table thead');
+  const tfootEl  = document.querySelector('.pg-table tfoot');
+  const paperW   = paperEl ? paperEl.offsetWidth : 794;
+  const pxPerMm  = paperW / 210;
+  const theadPx  = theadEl ? theadEl.offsetHeight : 180;
+  const tfootPx  = tfootEl ? tfootEl.offsetHeight : 28;
+  // Subtract 2 lines (~42px at 11px/1.9 line-height) to correct for observed offset
+  const availPx  = (PAGE_H_MM - MARGIN_T_MM - MARGIN_B_MM) * pxPerMm - theadPx - tfootPx - 42;
+
+  overlay.innerHTML = '';
+  const totalH = editor.scrollHeight;
+  let y = Math.round(availPx);
+  let n = 2;
+
+  while (y < totalH + 20) {
+    const line = document.createElement('div');
+    line.className = 'brk-line';
+    line.style.top = y + 'px';
+    overlay.appendChild(line);
+
+    const shade = document.createElement('div');
+    shade.className = 'brk-shade';
+    shade.style.top = y + 'px';
+    overlay.appendChild(shade);
+
+    const lbl = document.createElement('div');
+    lbl.className = 'brk-label';
+    lbl.textContent = 'Page ' + n;
+    lbl.style.top = y + 'px';
+    overlay.appendChild(lbl);
+
+    y += Math.round(availPx);
+    n++;
+  }
+}
+
+const breakObserver = new MutationObserver(updateBreaks);
+breakObserver.observe(editor, {childList:true, subtree:true, characterData:true});
+
+
+// ── Print spacer ─────────────────────────────────────────────────
+// Uses identical geometry to updateBreaks so the spacer matches the
+// dashed line position in the viewer exactly.
+
+window.addEventListener('beforeprint', () => {
+  // Remove any existing spacers
+  document.querySelectorAll('.print-spacer').forEach(s => s.remove());
+
+  const { availMm, pxPerMm } = getPageGeometry();
+  if (availMm <= 0) return;
+
+  // Content height in mm
+  const contentMm = editor.offsetHeight / pxPerMm;
+
+  // How many full pages does the content span?
+  const totalPages = Math.ceil(contentMm / availMm);
+  if (totalPages < 1) return;
+
+  // Height needed to fill exactly totalPages pages
+  const targetMm = totalPages * availMm;
+
+  // Gap between current content and the next full page boundary
+  // Subtract 1mm safety so we never nudge onto an extra page
+  const gapMm = targetMm - contentMm - 1;
+
+  // No spacer needed if already within 2mm of a page boundary
+  if (gapMm < 2 || gapMm > availMm - 2) return;
+
+  const spacer = document.createElement('div');
+  spacer.className = 'print-spacer';
+  spacer.style.height = gapMm.toFixed(2) + 'mm';
+  editor.appendChild(spacer);
+});
+
+window.addEventListener('afterprint', () => {
+  document.querySelectorAll('.print-spacer').forEach(s => s.remove());
+});
+editor.addEventListener('input', updateBreaks);
+window.addEventListener('resize', updateBreaks);
+requestAnimationFrame(() => requestAnimationFrame(updateBreaks));
+</script>
+
+<!-- Table floating toolbar -->
+<div class="tbl-toolbar" id="tblToolbar">
+  <button class="tbl-tb" onclick="tblAddRowAbove()">↑ Row above</button>
+  <button class="tbl-tb" onclick="tblAddRowBelow()">↓ Row below</button>
+  <div class="tbl-sep"></div>
+  <button class="tbl-tb" onclick="tblAddColLeft()">← Col left</button>
+  <button class="tbl-tb" onclick="tblAddColRight()">→ Col right</button>
+  <div class="tbl-sep"></div>
+  <button class="tbl-tb" onclick="tblDeleteRow()">Del row</button>
+  <button class="tbl-tb" onclick="tblDeleteCol()">Del col</button>
+  <div class="tbl-sep"></div>
+  <button class="tbl-tb danger" onclick="tblDeleteTable()">✕ Delete table</button>
+</div>
+
+<!-- Print margin warning overlay -->
+<div id="printWarning" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);
+  z-index:9999;display:none;align-items:center;justify-content:center;font-family:Arial,sans-serif;">
+  <div style="background:#fff;border-top:4px solid #E50076;padding:28px 32px;max-width:400px;
+    box-shadow:0 8px 32px rgba(0,0,0,.3);border-radius:2px;">
+    <div style="font-size:15px;font-weight:700;color:#1a1a1a;margin-bottom:10px;">Before you print</div>
+    <div style="font-size:12px;color:#505050;line-height:1.7;margin-bottom:18px;">
+      In Chrome's print dialog, please set:<br>
+      <strong>Margins → Default</strong><br>
+      (not Minimum — this ensures correct page margins)
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button onclick="document.getElementById('printWarning').style.display='none'"
+        style="padding:7px 16px;border:1px solid #ddd;background:#fff;cursor:pointer;
+        font-family:Arial,sans-serif;font-size:12px;border-radius:2px;">Cancel</button>
+      <button onclick="document.getElementById('printWarning').style.display='none';window.print()"
+        style="padding:7px 16px;background:#E50076;color:#fff;border:none;cursor:pointer;
+        font-family:Arial,sans-serif;font-size:12px;font-weight:700;border-radius:2px;">Print now</button>
+    </div>
+  </div>
+</div>
+<script>
+function printWithWarning() {
+  const w = document.getElementById('printWarning');
+  w.style.display = 'flex';
+}
+
+
+// ── Image insertion & resizing ────────────────────────────────
+
+function triggerImageUpload() {
+  document.getElementById('imgFileInput').click();
+}
+
+function insertImageFromFile(input) {
+  if (!input.files || !input.files[0]) return;
+  const file = input.files[0];
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    insertImageSrc(e.target.result);
+  };
+  reader.readAsDataURL(file);
+  // Reset so same file can be re-inserted
+  input.value = '';
+}
+
+function insertImageSrc(src) {
+  editor.focus();
+
+  const wrap = document.createElement('span');
+  wrap.contentEditable = 'false';
+  wrap.className = 'calc-img-wrap';
+
+  const img = document.createElement('img');
+  img.src = src;
+  img.draggable = false;
+  // Default width: fit within editor, max 400px
+  img.style.width = '300px';
+  img.style.height = 'auto';
+
+  const handle = document.createElement('span');
+  handle.className = 'img-resize-handle';
+  handle.title = 'Drag to resize';
+
+  const sizeLabel = document.createElement('span');
+  sizeLabel.className = 'img-size-label';
+
+  wrap.appendChild(img);
+  wrap.appendChild(handle);
+  wrap.appendChild(sizeLabel);
+
+  // Insert at cursor
+  const sel = window.getSelection();
+  if (sel.rangeCount) {
+    const range = sel.getRangeAt(0);
+    range.deleteContents();
+    range.insertNode(wrap);
+    // Move cursor after the image
+    range.setStartAfter(wrap);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } else {
+    editor.appendChild(wrap);
+  }
+
+  attachImageHandlers(wrap);
+  selectImage(wrap);
+}
+
+let selectedImg = null;
+
+function selectImage(wrap) {
+  if (selectedImg && selectedImg !== wrap) {
+    selectedImg.classList.remove('selected');
+  }
+  wrap.classList.add('selected');
+  selectedImg = wrap;
+}
+
+function deselectAllImages() {
+  document.querySelectorAll('.calc-img-wrap.selected').forEach(w => w.classList.remove('selected'));
+  selectedImg = null;
+}
+
+function attachImageHandlers(wrap) {
+  const img    = wrap.querySelector('img');
+  const handle = wrap.querySelector('.img-resize-handle');
+  const label  = wrap.querySelector('.img-size-label');
+
+  // Click image to select
+  img.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    selectImage(wrap);
+  });
+
+  // Drag handle to resize
+  handle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    selectImage(wrap);
+    wrap.classList.add('resizing');
+
+    const startX   = e.clientX;
+    const startW   = img.getBoundingClientRect().width;
+    const maxW     = editor.getBoundingClientRect().width - 30;
+
+    function onMove(e) {
+      const dx      = e.clientX - startX;
+      let   newW    = Math.round(Math.max(40, Math.min(maxW, startW + dx)));
+      img.style.width  = newW + 'px';
+      img.style.height = 'auto';
+      // Show size label
+      const h = Math.round(img.getBoundingClientRect().height);
+      label.textContent = newW + ' × ' + h + ' px';
+    }
+
+    function onUp() {
+      wrap.classList.remove('resizing');
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    }
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
+
+// Re-attach handlers to any images already in the editor (e.g. after paste)
+function reattachImageHandlers() {
+  editor.querySelectorAll('.calc-img-wrap').forEach(wrap => {
+    if (!wrap.dataset.handlersAttached) {
+      attachImageHandlers(wrap);
+      wrap.dataset.handlersAttached = '1';
+    }
+  });
+}
+
+// Deselect image on click outside
+document.addEventListener('mousedown', (e) => {
+  if (!e.target.closest('.calc-img-wrap')) {
+    deselectAllImages();
+  }
+});
+
+// Delete selected image with Delete/Backspace if editor not focused on text
+document.addEventListener('keydown', (e) => {
+  if (selectedImg && (e.key === 'Delete' || e.key === 'Backspace')) {
+    // Only delete image if the active element is the editor body (not a text node)
+    const active = document.activeElement;
+    if (active === editor || active === document.body) {
+      e.preventDefault();
+      selectedImg.remove();
+      selectedImg = null;
+    }
+  }
+});
+
+// Intercept paste — only take over when clipboard is image-only (no text).
+// If text is present, let the browser handle it normally.
+editor.addEventListener('paste', (e) => {
+  const cd = e.clipboardData;
+  if (!cd) return;
+
+  // If clipboard has any text content, let normal paste happen
+  const hasText = cd.types && (
+    cd.types.indexOf('text/plain') !== -1 ||
+    cd.types.indexOf('text/html') !== -1
+  );
+  if (hasText) return;
+
+  // Image-only clipboard (e.g. screenshot, snip tool, copy from image editor)
+  const items = cd.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault();
+      const file = item.getAsFile();
+      if (!file) continue;
+      const reader = new FileReader();
+      reader.onload = (ev) => insertImageSrc(ev.target.result);
+      reader.readAsDataURL(file);
+      return;
+    }
+  }
+});
+
+
+
+// ══════════════════════════════════════════════════════
+// TABLE SUPPORT
+// ══════════════════════════════════════════════════════
+
+// ── Grid picker ────────────────────────────────────────
+(function buildGrid() {
+  const cells = document.getElementById('gridCells');
+  if (!cells) return;
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'grid-cell';
+      cell.dataset.r = r;
+      cell.dataset.c = c;
+      cells.appendChild(cell);
+    }
+  }
+  cells.addEventListener('mousemove', (e) => {
+    const t = e.target.closest('.grid-cell');
+    if (!t) return;
+    const hr = +t.dataset.r, hc = +t.dataset.c;
+    cells.querySelectorAll('.grid-cell').forEach(el => {
+      el.classList.toggle('hover', +el.dataset.r <= hr && +el.dataset.c <= hc);
+    });
+    document.getElementById('gridLabel').textContent = (hc+1) + ' × ' + (hr+1);
+  });
+  cells.addEventListener('mouseleave', () => {
+    cells.querySelectorAll('.grid-cell').forEach(el => el.classList.remove('hover'));
+    document.getElementById('gridLabel').textContent = '0 × 0';
+  });
+  cells.addEventListener('click', (e) => {
+    const t = e.target.closest('.grid-cell');
+    if (!t) return;
+    insertTable(+t.dataset.r + 1, +t.dataset.c + 1);
+    closeGridPicker();
+  });
+})();
+
+function toggleGridPicker() {
+  document.getElementById('gridPicker').classList.toggle('open');
+}
+function closeGridPicker() {
+  document.getElementById('gridPicker').classList.remove('open');
+}
+document.addEventListener('mousedown', (e) => {
+  if (!e.target.closest('.grid-picker-wrap')) closeGridPicker();
+});
+
+// ── Insert table ───────────────────────────────────────
+function insertTable(rows, cols) {
+  editor.focus();
+
+  const table = document.createElement('table');
+  table.className = 'calc-table';
+
+  // Header row
+  const thead = document.createElement('thead');
+  const hrow  = document.createElement('tr');
+  for (let c = 0; c < cols; c++) {
+    const th = document.createElement('th');
+    th.contentEditable = 'true';
+    th.textContent = 'Header ' + (c + 1);
+    hrow.appendChild(th);
+  }
+  thead.appendChild(hrow);
+  table.appendChild(thead);
+
+  // Body rows
+  const tbody = document.createElement('tbody');
+  for (let r = 0; r < rows; r++) {
+    const tr = document.createElement('tr');
+    for (let c = 0; c < cols; c++) {
+      const td = document.createElement('td');
+      td.contentEditable = 'true';
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+
+  // Insert at cursor
+  const sel = window.getSelection();
+  if (sel.rangeCount) {
+    const range = sel.getRangeAt(0);
+    // Walk up to find a block-level ancestor inside editor
+    let node = range.commonAncestorContainer;
+    while (node && node.parentNode !== editor) node = node.parentNode;
+    if (node && node !== editor) {
+      node.parentNode.insertBefore(table, node.nextSibling);
+    } else {
+      editor.appendChild(table);
+    }
+  } else {
+    editor.appendChild(table);
+  }
+
+  // Insert a blank paragraph after the table so cursor can escape
+  const p = document.createElement('p');
+  p.innerHTML = '<br>';
+  table.parentNode.insertBefore(p, table.nextSibling);
+
+  // Focus first cell
+  const firstCell = table.querySelector('th, td');
+  if (firstCell) {
+    firstCell.focus();
+    const r = document.createRange();
+    r.selectNodeContents(firstCell);
+    r.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }
+
+  attachTableHandlers(table);
+}
+
+// ── Floating toolbar tracking ──────────────────────────
+let activeTable = null;
+let activeCell  = null;
+
+const tblToolbar = document.getElementById('tblToolbar');
+
+function showTableToolbar(table, cell) {
+  activeTable = table;
+  activeCell  = cell;
+
+  const editorRect = editor.getBoundingClientRect();
+  const tableRect  = table.getBoundingClientRect();
+  const scrollTop  = editor.scrollTop || 0;
+
+  // Position above the table, relative to calc-body
+  const calcBody = document.querySelector('.calc-body');
+  const cbRect   = calcBody.getBoundingClientRect();
+
+  tblToolbar.style.top  = (tableRect.top - cbRect.top - 32) + 'px';
+  tblToolbar.style.left = (tableRect.left - cbRect.left) + 'px';
+  tblToolbar.classList.add('visible');
+}
+
+function hideTableToolbar() {
+  tblToolbar.classList.remove('visible');
+  activeTable = null;
+  activeCell  = null;
+}
+
+// ── Attach event handlers to a table ──────────────────
+function attachTableHandlers(table) {
+  table.addEventListener('focusin', (e) => {
+    const cell = e.target.closest('td, th');
+    if (cell) showTableToolbar(table, cell);
+  });
+  table.addEventListener('focusout', (e) => {
+    // Delay so toolbar button clicks register first
+    setTimeout(() => {
+      if (!table.contains(document.activeElement) &&
+          !tblToolbar.contains(document.activeElement)) {
+        hideTableToolbar();
+      }
+    }, 150);
+  });
+
+  // Tab / Shift+Tab to move between cells
+  table.addEventListener('keydown', (e) => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const cells = Array.from(table.querySelectorAll('th, td'));
+      const idx   = cells.indexOf(document.activeElement);
+      if (idx === -1) return;
+      if (e.shiftKey) {
+        if (idx > 0) cells[idx - 1].focus();
+      } else {
+        if (idx < cells.length - 1) {
+          cells[idx + 1].focus();
+        } else {
+          // Add a new row at the end
+          tblAddRowBelow();
+          const newCells = Array.from(table.querySelectorAll('td'));
+          const firstNew = newCells[newCells.length - table.querySelector('tr').cells.length];
+          if (firstNew) firstNew.focus();
+        }
+      }
+    }
+  });
+}
+
+// Re-attach handlers for tables already in the document
+function reattachTableHandlers() {
+  editor.querySelectorAll('.calc-table').forEach(t => {
+    if (!t.dataset.tblHandlers) {
+      t.dataset.tblHandlers = '1';
+      attachTableHandlers(t);
+    }
+  });
+}
+new MutationObserver(reattachTableHandlers).observe(editor, { childList: true, subtree: true });
+
+// ── Toolbar actions ────────────────────────────────────
+function tblAddRowBelow() {
+  if (!activeTable || !activeCell) return;
+  const row    = activeCell.closest('tr');
+  const colCnt = activeTable.rows[0].cells.length;
+  const newRow = document.createElement('tr');
+  for (let i = 0; i < colCnt; i++) {
+    const td = document.createElement('td');
+    td.contentEditable = 'true';
+    newRow.appendChild(td);
+  }
+  row.parentNode.insertBefore(newRow, row.nextSibling);
+  newRow.cells[0].focus();
+}
+
+function tblAddRowAbove() {
+  if (!activeTable || !activeCell) return;
+  const row    = activeCell.closest('tr');
+  const colCnt = activeTable.rows[0].cells.length;
+  const newRow = document.createElement('tr');
+  for (let i = 0; i < colCnt; i++) {
+    const td = document.createElement('td');
+    td.contentEditable = 'true';
+    newRow.appendChild(td);
+  }
+  row.parentNode.insertBefore(newRow, row);
+  newRow.cells[0].focus();
+}
+
+function tblAddColRight() {
+  if (!activeTable || !activeCell) return;
+  const cellIdx = activeCell.cellIndex;
+  Array.from(activeTable.rows).forEach((row, ri) => {
+    const cell = ri === 0 ? document.createElement('th') : document.createElement('td');
+    cell.contentEditable = 'true';
+    const ref = row.cells[cellIdx + 1] || null;
+    row.insertBefore(cell, ref ? ref.nextSibling : null);
+  });
+}
+
+function tblAddColLeft() {
+  if (!activeTable || !activeCell) return;
+  const cellIdx = activeCell.cellIndex;
+  Array.from(activeTable.rows).forEach((row, ri) => {
+    const cell = ri === 0 ? document.createElement('th') : document.createElement('td');
+    cell.contentEditable = 'true';
+    row.insertBefore(cell, row.cells[cellIdx]);
+  });
+}
+
+function tblDeleteRow() {
+  if (!activeTable || !activeCell) return;
+  const row = activeCell.closest('tr');
+  if (activeTable.rows.length <= 1) { tblDeleteTable(); return; }
+  const prevRow = row.previousElementSibling || row.nextElementSibling;
+  row.remove();
+  if (prevRow) prevRow.cells[0].focus();
+  else hideTableToolbar();
+}
+
+function tblDeleteCol() {
+  if (!activeTable || !activeCell) return;
+  const idx = activeCell.cellIndex;
+  if (activeTable.rows[0].cells.length <= 1) { tblDeleteTable(); return; }
+  Array.from(activeTable.rows).forEach(row => {
+    if (row.cells[idx]) row.cells[idx].remove();
+  });
+}
+
+function tblDeleteTable() {
+  if (!activeTable) return;
+  hideTableToolbar();
+  activeTable.remove();
+}
+
+// Hide toolbar on click outside both table and toolbar
+document.addEventListener('mousedown', (e) => {
+  if (!e.target.closest('.calc-table') && !e.target.closest('#tblToolbar')) {
+    hideTableToolbar();
+  }
+});
+
+// Make tblToolbar position relative to calc-body
+document.querySelector('.calc-body').appendChild(tblToolbar);
+
+
+
+// ══════════════════════════════════════
+// FONT SIZE + COLOUR
+// ══════════════════════════════════════
+
+const TEXT_COLOURS = [
+  '#000000','#505050','#7a7a7a','#ffffff',
+  '#E50076','#554596','#F9B000',
+  '#c0392b','#e67e22','#27ae60','#2980b9','#8e44ad',
+  '#1abc9c','#f39c12','#d35400','#2c3e50','#7f8c8d',
+  '#fadbd8','#fdebd0','#fef9e7','#eafaf1','#eaf2ff','#f4ecf7',
+];
+
+const HL_COLOURS = [
+  'transparent',
+  '#fff8c5','#fde8c8','#fde8e8','#e8f5e9','#e3f2fd','#f3e5f5',
+  '#ffffcc','#ffecb3','#ffe0e0','#d4edda','#cce5ff','#e2d9f3',
+];
+
+function buildColourGrid(gridId, colours, applyFn) {
+  const grid = document.getElementById(gridId);
+  if (!grid || grid.dataset.built) return;
+  grid.dataset.built = '1';
+  colours.forEach(c => {
+    const btn = document.createElement('button');
+    btn.className = 'colour-swatch-btn';
+    btn.style.background = c === 'transparent' ? 'repeating-linear-gradient(45deg,#ddd,#ddd 2px,#fff 2px,#fff 6px)' : c;
+    btn.title = c;
+    btn.addEventListener('mousedown', e => { e.preventDefault(); applyFn(c); });
+    grid.appendChild(btn);
+  });
+}
+
+function toggleColourPanel(which) {
+  buildColourGrid('textColourGrid', TEXT_COLOURS, (c) => applyTextColour(c));
+  buildColourGrid('hlColourGrid', HL_COLOURS, (c) => applyHighlight(c));
+  const textP = document.getElementById('textColourPanel');
+  const hlP   = document.getElementById('hlColourPanel');
+  if (which === 'text') {
+    textP.classList.toggle('open');
+    hlP.classList.remove('open');
+  } else {
+    hlP.classList.toggle('open');
+    textP.classList.remove('open');
+  }
+}
+
+document.addEventListener('mousedown', e => {
+  if (!e.target.closest('#textColourWrap')) document.getElementById('textColourPanel').classList.remove('open');
+  if (!e.target.closest('#hlColourWrap'))   document.getElementById('hlColourPanel').classList.remove('open');
+});
+
+function applyTextColour(colour, fromInput) {
+  editor.focus();
+  document.execCommand('foreColor', false, colour);
+  document.getElementById('textColourSwatch').style.background = colour;
+  if (!fromInput) document.getElementById('textColourPanel').classList.remove('open');
+}
+
+function applyHighlight(colour, fromInput) {
+  editor.focus();
+  if (colour === 'transparent' || colour === 'none') {
+    document.execCommand('removeFormat', false, null);
+  } else {
+    document.execCommand('hiliteColor', false, colour);
+  }
+  document.getElementById('hlColourSwatch').style.background =
+    colour === 'transparent' ? 'repeating-linear-gradient(45deg,#ddd,#ddd 2px,#fff 2px,#fff 6px)' : colour;
+  if (!fromInput) document.getElementById('hlColourPanel').classList.remove('open');
+}
+
+function applyFontSize(size) {
+  if (!size) return;
+  editor.focus();
+  // execCommand fontSize only accepts 1-7, so we use a span approach
+  const sel = window.getSelection();
+  if (!sel.rangeCount || sel.isCollapsed) return;
+  document.execCommand('fontSize', false, '7'); // placeholder
+  // Replace the placeholder font elements with inline style
+  editor.querySelectorAll('font[size="7"]').forEach(el => {
+    const span = document.createElement('span');
+    span.style.fontSize = size;
+    span.innerHTML = el.innerHTML;
+    el.replaceWith(span);
+  });
+  document.getElementById('fontSizeSel').value = '';
+}
+
+
+
+// ══════════════════════════════════════════════════
+// FILE OPERATIONS
+// ══════════════════════════════════════════════════
+
+let currentFileName = 'Untitled';
+let isDirty = false;
+
+// Mark dirty on any editor change
+const dirtyObserver = new MutationObserver(() => { isDirty = true; updateDocTitle(); });
+dirtyObserver.observe(editor, { childList:true, subtree:true, characterData:true });
+
+function updateDocTitle() {
+  const name = currentFileName + (isDirty ? ' *' : '');
+  document.querySelector('.logo').nextElementSibling.nextElementSibling &&
+    null; // just used isDirty for title bar update
+  document.title = name + ' — Perega Formula Editor';
+}
+
+// ── File menu ──────────────────────────────────────
+function toggleFileMenu() {
+  document.getElementById('fileDropdown').classList.toggle('open');
+}
+document.addEventListener('mousedown', e => {
+  if (!e.target.closest('#fileMenuWrap')) {
+    document.getElementById('fileDropdown').classList.remove('open');
+  }
+});
+function closeFileMenu() {
+  document.getElementById('fileDropdown').classList.remove('open');
+}
+
+// ── New ───────────────────────────────────────────
+function fileNew() {
+  closeFileMenu();
+  if (isDirty && !confirm('Unsaved changes will be lost. Continue?')) return;
+  editor.innerHTML = '';
+  // Clear meta fields
+  ['m-project','m-projno','m-date','m-desc','m-sheet','m-orig',
+   'm-deliv','m-checked','m-suit','m-rev'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = id === 'm-date' ? new Date().toLocaleDateString('en-GB') : '';
+  });
+  currentFileName = 'Untitled';
+  isDirty = false;
+  updateDocTitle();
+  rebuildVars();
+}
+
+// ── Save ──────────────────────────────────────────
+function collectMeta() {
+  const ids = ['m-project','m-projno','m-date','m-desc','m-sheet',
+               'm-orig','m-deliv','m-checked','m-suit','m-rev'];
+  const out = {};
+  ids.forEach(id => { const el = document.getElementById(id); out[id] = el ? el.value : ''; });
+  return out;
+}
+function restoreMeta(meta) {
+  Object.entries(meta).forEach(([id, val]) => {
+    const el = document.getElementById(id); if (el) el.value = val;
+  });
+}
+
+function buildSaveData() {
+  return JSON.stringify({
+    version: 1,
+    meta: collectMeta(),
+    content: editor.innerHTML,
+    savedAt: new Date().toISOString()
+  }, null, 2);
+}
+
+function triggerDownload(data, filename) {
+  const blob = new Blob([data], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function fileSave() {
+  closeFileMenu();
+  if (currentFileName === 'Untitled') { fileSaveAs(); return; }
+  triggerDownload(buildSaveData(), currentFileName + '.perega');
+  isDirty = false; updateDocTitle();
+}
+
+function fileSaveAs() {
+  closeFileMenu();
+  const name = prompt('Save as:', currentFileName);
+  if (name === null) return;
+  currentFileName = name.replace(/\.perega$/, '') || 'Untitled';
+  triggerDownload(buildSaveData(), currentFileName + '.perega');
+  isDirty = false; updateDocTitle();
+}
+
+// ── Open ──────────────────────────────────────────
+function fileOpen() {
+  closeFileMenu();
+  if (isDirty && !confirm('Unsaved changes will be lost. Continue?')) return;
+  document.getElementById('openFileInput').click();
+}
+
+function loadFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (data.version !== 1) throw new Error('Unknown file version');
+      editor.innerHTML = data.content || '';
+      restoreMeta(data.meta || {});
+      currentFileName = file.name.replace(/\.perega$/, '');
+      isDirty = false; updateDocTitle();
+      // Re-attach image and table handlers
+      editor.querySelectorAll('.calc-img-wrap').forEach(w => {
+        if (!w.dataset.handlersAttached) { attachImageHandlers(w); w.dataset.handlersAttached='1'; }
+      });
+      rebuildVars();
+    } catch(err) {
+      alert('Could not open file: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+  input.value = '';
+}
+
+// ── Export to Word ─────────────────────────────────
+async function exportWord() {
+  closeFileMenu();
+
+  if (typeof docx === 'undefined') {
+    alert('Word export library not loaded. Please check your internet connection.');
+    return;
+  }
+
+  const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
+          HeadingLevel, AlignmentType, BorderStyle, WidthType, ShadingType,
+          ImageRun, LevelFormat } = docx;
+
+  // Walk the editor DOM and convert to docx paragraphs/tables
+  const children = [];
+  const numbering = {
+    config: [
+      { reference:'bullets', levels:[{ level:0, format:LevelFormat.BULLET, text:'•',
+          alignment:AlignmentType.LEFT,
+          style:{ paragraph:{ indent:{ left:720, hanging:360 } } } }] },
+      { reference:'numbers', levels:[{ level:0, format:LevelFormat.DECIMAL, text:'%1.',
+          alignment:AlignmentType.LEFT,
+          style:{ paragraph:{ indent:{ left:720, hanging:360 } } } }] },
+    ]
+  };
+
+  function getRuns(el) {
+    const runs = [];
+    function walk(node, fmt) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const t = node.textContent;
+        if (t) runs.push(new TextRun({ text: t, ...fmt }));
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      const tag = node.tagName.toLowerCase();
+      const style = window.getComputedStyle(node);
+      const newFmt = { ...fmt };
+      if (tag === 'b' || tag === 'strong' || style.fontWeight >= 700) newFmt.bold = true;
+      if (tag === 'i' || tag === 'em' || style.fontStyle === 'italic') newFmt.italics = true;
+      if (tag === 'u') newFmt.underline = {};
+      if (tag === 's' || tag === 'strike') newFmt.strike = true;
+      // formula-chip: extract the result value only
+      if (node.classList && node.classList.contains('formula-chip')) {
+        const res = node.querySelector('.fc-res, .katex-html');
+        const t = res ? res.textContent.trim() : node.textContent.trim();
+        if (t) runs.push(new TextRun({ text: t, italics: true, ...fmt }));
+        return;
+      }
+      // var-def-chip: name = value
+      if (node.classList && node.classList.contains('var-def-chip')) {
+        const t = node.dataset.varExpr
+          ? (node.dataset.varName + ' = ' + node.dataset.varExpr + ' = ' + node.dataset.varVal)
+          : (node.dataset.varName + ' = ' + node.dataset.varVal);
+        if (t) runs.push(new TextRun({ text: t, italics: true, ...fmt }));
+        return;
+      }
+      for (const child of node.childNodes) walk(child, newFmt);
+    }
+    walk(el, {});
+    return runs;
+  }
+
+  function convertNode(node) {
+    if (node.nodeType !== Node.ELEMENT_NODE) return null;
+    const tag = node.tagName.toLowerCase();
+
+    if (tag === 'h1') return new Paragraph({ heading: HeadingLevel.HEADING_1, children: getRuns(node) });
+    if (tag === 'h2') return new Paragraph({ heading: HeadingLevel.HEADING_2, children: getRuns(node) });
+    if (tag === 'h3') return new Paragraph({ heading: HeadingLevel.HEADING_3, children: getRuns(node) });
+
+    if (tag === 'blockquote') return new Paragraph({
+      indent: { left: 720 },
+      children: getRuns(node),
+    });
+
+    if (tag === 'ul') {
+      const items = [];
+      node.querySelectorAll(':scope > li').forEach(li => {
+        items.push(new Paragraph({ numbering:{ reference:'bullets', level:0 }, children: getRuns(li) }));
+      });
+      return items;
+    }
+    if (tag === 'ol') {
+      const items = [];
+      node.querySelectorAll(':scope > li').forEach(li => {
+        items.push(new Paragraph({ numbering:{ reference:'numbers', level:0 }, children: getRuns(li) }));
+      });
+      return items;
+    }
+
+    // Calc table
+    if (tag === 'table' && node.classList.contains('calc-table')) {
+      const rows = [];
+      const pageWidth = 9026; // A4 content width in DXA
+      const cols = node.rows[0] ? node.rows[0].cells.length : 1;
+      const colW = Math.floor(pageWidth / cols);
+      const colWidths = Array(cols).fill(colW);
+      const border = { style: BorderStyle.SINGLE, size: 4, color: '888888' };
+      const borders = { top:border, bottom:border, left:border, right:border };
+      Array.from(node.rows).forEach(row => {
+        const cells = [];
+        Array.from(row.cells).forEach(cell => {
+          const isHeader = cell.tagName === 'TH';
+          cells.push(new TableCell({
+            borders,
+            width: { size: colW, type: WidthType.DXA },
+            shading: isHeader ? { fill:'F0F0F0', type:ShadingType.CLEAR } : undefined,
+            margins: { top:80, bottom:80, left:120, right:120 },
+            children: [new Paragraph({ children: getRuns(cell),
+              ...(isHeader ? { run:{ bold:true } } : {}) })],
+          }));
+        });
+        rows.push(new TableRow({ children: cells }));
+      });
+      return new Table({
+        width: { size: pageWidth, type: WidthType.DXA },
+        columnWidths: colWidths,
+        rows,
+      });
+    }
+
+    // Inline image wrap
+    if (tag === 'span' && node.classList.contains('calc-img-wrap')) {
+      const img = node.querySelector('img');
+      if (!img || !img.src.startsWith('data:')) return null;
+      const [meta, b64] = img.src.split(',');
+      const mtype = meta.match(/image\/(png|jpeg|gif|webp)/)?.[1] || 'png';
+      const binStr = atob(b64);
+      const bytes = new Uint8Array(binStr.length);
+      for (let i=0;i<binStr.length;i++) bytes[i]=binStr.charCodeAt(i);
+      const w = img.naturalWidth || 200;
+      const h = img.naturalHeight || 200;
+      const maxW = 9026 * 914400 / 9026; // full width in EMU
+      const scaledW = Math.min(w * 9144, maxW); // px to EMU (96dpi)
+      const scaledH = Math.round(scaledW * h / w);
+      return new Paragraph({ children: [
+        new ImageRun({ data: bytes, transformation:{ width:Math.round(scaledW/9144), height:Math.round(scaledH/9144) }, type:mtype })
+      ]});
+    }
+
+    // Default: paragraph
+    const runs = getRuns(node);
+    if (!runs.length) return new Paragraph({});
+    return new Paragraph({ children: runs });
+  }
+
+  // Walk top-level editor children
+  for (const node of editor.childNodes) {
+    const result = convertNode(node);
+    if (!result) continue;
+    if (Array.isArray(result)) children.push(...result);
+    else children.push(result);
+  }
+  if (!children.length) children.push(new Paragraph({}));
+
+  const doc = new Document({
+    numbering,
+    styles: {
+      default: { document: { run: { font:'Arial', size:22 } } },
+      paragraphStyles: [
+        { id:'Heading1', name:'Heading 1', basedOn:'Normal', next:'Normal', quickFormat:true,
+          run:{ size:32, bold:true, color:'E50076', font:'Arial' },
+          paragraph:{ spacing:{ before:240, after:120 }, outlineLevel:0 } },
+        { id:'Heading2', name:'Heading 2', basedOn:'Normal', next:'Normal', quickFormat:true,
+          run:{ size:28, bold:true, color:'554596', font:'Arial' },
+          paragraph:{ spacing:{ before:180, after:80 }, outlineLevel:1 } },
+        { id:'Heading3', name:'Heading 3', basedOn:'Normal', next:'Normal', quickFormat:true,
+          run:{ size:24, bold:true, color:'F9B000', font:'Arial' },
+          paragraph:{ spacing:{ before:120, after:60 }, outlineLevel:2 } },
+      ]
+    },
+    sections: [{
+      properties: {
+        page: { size:{ width:11906, height:16838 }, margin:{ top:1134, bottom:1134, left:1134, right:1134 } }
+      },
+      children
+    }]
+  });
+
+  try {
+    const buffer = await Packer.toBlob(doc);
+    const url = URL.createObjectURL(buffer);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (currentFileName || 'calculations') + '.docx';
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch(err) {
+    alert('Export failed: ' + err.message);
+    console.error(err);
+  }
+}
+
+updateDocTitle();
+
+
+
+
+
+</script>
+</body>
+</html>
