@@ -261,11 +261,10 @@ body{
   .page-wrap{display:block}
 
   .a4-page{
-    width:210mm;height:297mm;
+    width:210mm;min-height:297mm;
     box-shadow:none;
     page-break-after:always;
-    page-break-inside:avoid;
-    overflow:hidden;
+    overflow:visible;
   }
   .a4-page:last-of-type{page-break-after:avoid}
 
@@ -569,7 +568,7 @@ function evalFormula(raw, variables) {
     if (varNames.has(name)) return m;
     return FUNS[up] ? up + m.slice(name.length) : m;
   });
-  expr = expr.replace(/([a-zA-Z0-9_)]+)\s*\^\s*([a-zA-Z0-9_(]+)/g, 'Math.pow($1,$2)');
+  expr = expr.replace(/\^/g, '**');
   const vnames = Object.keys(variables).sort((a,b) => b.length - a.length);
   for (const vn of vnames)
     expr = expr.replace(new RegExp(`\\b${vn}\\b`, 'g'), `(${variables[vn]})`);
@@ -849,6 +848,35 @@ function makeFormulaChip(formula, result, isError) {
   chip.dataset.formula = formula;
   setFormulaContent(chip, formula, result, isError);
   return chip;
+}
+
+function startEditFormulaChip(chip) {
+  const formula = chip.dataset.formula;
+  if (!formula) return;
+  const textNode = document.createTextNode('=' + formula);
+  chip.parentNode.replaceChild(textNode, chip);
+  const range = document.createRange();
+  range.setStart(textNode, textNode.length);
+  range.collapse(true);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  formulaBuffer = formula;
+}
+
+function startEditVarDefChip(chip) {
+  const name = chip.dataset.varName;
+  const expr = chip.dataset.varExpr || chip.dataset.varVal;
+  if (!name) return;
+  const textNode = document.createTextNode(name + ' = ' + expr);
+  chip.parentNode.replaceChild(textNode, chip);
+  const range = document.createRange();
+  range.setStart(textNode, textNode.length);
+  range.collapse(true);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  rebuildVars();
 }
 
 function setFormulaContent(chip, formula, result, isError) {
@@ -1385,6 +1413,24 @@ function commitFormula(ed) {
 
 function cancelFormula() { formulaBuffer = null; }
 
+// Click a formula chip to expand it back to editable text
+document.addEventListener('click', e => {
+  const chip = e.target.closest('.formula-chip');
+  if (chip && chip.closest('.calc-area')) {
+    e.preventDefault();
+    startEditFormulaChip(chip);
+  }
+});
+
+// Double-click a var-def chip to expand it back to editable text
+document.addEventListener('dblclick', e => {
+  const chip = e.target.closest('.var-def-chip');
+  if (chip && chip.closest('.calc-area') && !e.target.closest('.vdc-edit-input')) {
+    e.preventDefault();
+    startEditVarDefChip(chip);
+  }
+});
+
 function commitVarDef(textNode, name, val, expr) {
   const parent = textNode.parentNode;
   const frag = document.createDocumentFragment();
@@ -1722,6 +1768,7 @@ function loadFile(input) {
         newEd.innerHTML = pages[i] || '';
       }
       restoreMeta(data.meta || {});
+      updateMirrorHeaders();
       currentFileName = file.name.replace(/\.perega$/, '');
       isDirty = false; document.title = currentFileName + ' — Perega';
       rebuildVars();
