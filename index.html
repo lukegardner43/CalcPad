@@ -851,8 +851,12 @@ function makeFormulaChip(formula, result, isError) {
 }
 
 function startEditFormulaChip(chip) {
+  formulaBuffer = null;
   const formula = chip.dataset.formula;
   if (!formula) return;
+  // Remove the trailing non-breaking space spacer so cursor lands in the text node
+  const next = chip.nextSibling;
+  if (next && next.nodeType === Node.TEXT_NODE && next.textContent === ' ') next.remove();
   const textNode = document.createTextNode('=' + formula);
   chip.parentNode.replaceChild(textNode, chip);
   const range = document.createRange();
@@ -861,13 +865,17 @@ function startEditFormulaChip(chip) {
   const sel = window.getSelection();
   sel.removeAllRanges();
   sel.addRange(range);
-  formulaBuffer = formula;
+  formulaBuffer = '';
 }
 
 function startEditVarDefChip(chip) {
+  formulaBuffer = null;
   const name = chip.dataset.varName;
   const expr = chip.dataset.varExpr || chip.dataset.varVal;
   if (!name) return;
+  // Remove the trailing non-breaking space spacer so cursor lands in the text node
+  const next = chip.nextSibling;
+  if (next && next.nodeType === Node.TEXT_NODE && next.textContent === ' ') next.remove();
   const textNode = document.createTextNode(name + ' = ' + expr);
   chip.parentNode.replaceChild(textNode, chip);
   const range = document.createRange();
@@ -876,7 +884,6 @@ function startEditVarDefChip(chip) {
   const sel = window.getSelection();
   sel.removeAllRanges();
   sel.addRange(range);
-  rebuildVars();
 }
 
 function setFormulaContent(chip, formula, result, isError) {
@@ -1287,7 +1294,7 @@ function rebuildVars() {
       if (!name) return;
       if (expr) {
         try {
-          const v = parseFloat(evalFormula(expr, vars));
+          const v = parseFloat(evalFormula(expr, vars).replace(/,/g, ''));
           if (!isNaN(v)) {
             chip.dataset.varVal = String(v);
             renderVarChipContent(chip);
@@ -1345,7 +1352,7 @@ document.addEventListener('keydown', e => {
       const exprStr = m[2].trim();
       let val;
       try {
-        val = parseFloat(evalFormula(exprStr, vars));
+        val = parseFloat(evalFormula(exprStr, vars).replace(/,/g, ''));
         if (isNaN(val)) throw new Error('NaN');
       } catch(err) { return; }
       e.preventDefault();
