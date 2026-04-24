@@ -1015,8 +1015,9 @@ function renderVarChipContent(chip) {
       const sub = toLatexSubstituted(expr, vars, varUnits);
       const kx = s => katex.renderToString(s, {displayMode: false, throwOnError: false, output: 'html'});
       inner =
-        `<span class="fseg flhs">${kx(nameLatex + ' = ' + latexExpr)}</span>` +
+        `<span class="fseg flhs">${kx(nameLatex)}</span>` +
         `<span class="fseg-right">` +
+        `<span class="fseg"><span class="feq"> = </span>${kx(latexExpr)}</span>` +
         (sub ? `<span class="fseg"><span class="feq"> = </span>${kx(sub)}</span>` : '') +
         `<span class="fseg"><span class="feq"> = </span>${kx(latexVal)}</span>` +
         `</span>`;
