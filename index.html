@@ -1562,6 +1562,30 @@ requestAnimationFrame(() => {
   });
 });
 
+// ── Auto-save to localStorage ─────────────────────────────────
+const LS_KEY = 'calcpad_autosave';
+let _autoSaveTimer = null;
+function autoSave() {
+  clearTimeout(_autoSaveTimer);
+  _autoSaveTimer = setTimeout(() => {
+    try { localStorage.setItem(LS_KEY, buildSaveData()); } catch(e) {}
+  }, 500);
+}
+function loadFromLocalStorage() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    const pages = data.pages || [data.content || ''];
+    for (let i = pageCount - 1; i >= 1; i--) { const w = document.getElementById('pageWrap'+i); if(w)w.remove(); }
+    pageCount = 1;
+    document.getElementById('editor').innerHTML = pages[0] || '';
+    for (let i = 1; i < pages.length; i++) { const newEd = addPage(); newEd.innerHTML = pages[i] || ''; }
+    restoreMeta(data.meta || {});
+    updateMirrorHeaders();
+  } catch(e) {}
+}
+
 loadFromLocalStorage();
 rebuildVars();
 
@@ -2113,29 +2137,6 @@ function buildSaveData() {
   const pages = [];
   getAllEditors().forEach((ed, i) => pages.push(ed.innerHTML));
   return JSON.stringify({ version:2, meta:collectMeta(), pages, savedAt:new Date().toISOString() }, null, 2);
-}
-
-const LS_KEY = 'calcpad_autosave';
-let _autoSaveTimer = null;
-function autoSave() {
-  clearTimeout(_autoSaveTimer);
-  _autoSaveTimer = setTimeout(() => {
-    try { localStorage.setItem(LS_KEY, buildSaveData()); } catch(e) {}
-  }, 500);
-}
-function loadFromLocalStorage() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return;
-    const data = JSON.parse(raw);
-    const pages = data.pages || [data.content || ''];
-    for (let i = pageCount - 1; i >= 1; i--) { const w = document.getElementById('pageWrap'+i); if(w)w.remove(); }
-    pageCount = 1;
-    document.getElementById('editor').innerHTML = pages[0] || '';
-    for (let i = 1; i < pages.length; i++) { const newEd = addPage(); newEd.innerHTML = pages[i] || ''; }
-    restoreMeta(data.meta || {});
-    updateMirrorHeaders();
-  } catch(e) {}
 }
 
 function triggerDownload(data, filename) {
