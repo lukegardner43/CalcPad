@@ -667,6 +667,76 @@ function evalUnitExpr(formula, varUnitsMap) {
   try{return parseExpr();}catch(e){return null;}
 }
 
+// ── Unit conversion to SI ──────────────────────────────────
+// Conversion factors: symbol → multiply by this to get SI base unit value
+const UNIT_CONVERSIONS = {
+  // Length → m
+  mm: 1e-3, cm: 1e-2, m: 1, km: 1e3,
+  // Force → N
+  N: 1, kN: 1e3, MN: 1e6,
+  // Mass → kg
+  g: 1e-3, kg: 1, t: 1e3,
+  // Pressure/Stress → Pa
+  Pa: 1, kPa: 1e3, MPa: 1e6, GPa: 1e9,
+  // Time → s
+  s: 1, ms: 1e-3, min: 60, hr: 3600,
+  // Angle → rad
+  deg: Math.PI / 180, rad: 1,
+};
+// Maps each symbol to its SI base unit symbol
+const UNIT_SI_BASE = {
+  mm: 'm', cm: 'm', m: 'm', km: 'm',
+  N: 'N', kN: 'N', MN: 'N',
+  g: 'kg', kg: 'kg', t: 'kg',
+  Pa: 'Pa', kPa: 'Pa', MPa: 'Pa', GPa: 'Pa',
+  s: 's', ms: 's', min: 's', hr: 's',
+  deg: 'rad', rad: 'rad',
+};
+// Serialise a unit-object back to a string, e.g. {N:1,m:-2} → "N/m^2"
+function unitObjToStr(u) {
+  if (!u) return '';
+  const pos = Object.entries(u).filter(([,e])=>e>0).sort(([a],[b])=>a.localeCompare(b));
+  const neg = Object.entries(u).filter(([,e])=>e<0).sort(([a],[b])=>a.localeCompare(b));
+  const fmt = ([sym,exp]) => Math.abs(exp)===1 ? sym : sym+'^'+Math.abs(exp);
+  let str = pos.map(fmt).join('*');
+  if (neg.length) str += '/' + neg.map(fmt).join('*');
+  return str;
+}
+// Returns the total conversion factor for a compound unit-object, or null if any symbol is unknown.
+function getUnitConversionFactor(unitObj) {
+  if (!unitObj || !Object.keys(unitObj).length) return null;
+  let factor = 1;
+  for (const [sym, exp] of Object.entries(unitObj)) {
+    const f = UNIT_CONVERSIONS[sym];
+    if (f === undefined || !UNIT_SI_BASE[sym]) return null;
+    factor *= Math.pow(f, exp);
+  }
+  return factor;
+}
+// Maps a compound unit-object to one using SI base symbols, e.g. {kN:1,m:-2} → {N:1,m:-2}
+function toSIUnitObj(unitObj) {
+  if (!unitObj) return null;
+  const r = {};
+  for (const [sym, exp] of Object.entries(unitObj)) {
+    const base = UNIT_SI_BASE[sym];
+    if (!base) return null;
+    r[base] = (r[base] || 0) + exp;
+    if (!r[base]) delete r[base];
+  }
+  return r;
+}
+// Given an original numeric value and a unit string, returns {siVal, siUnitStr}
+// or null when the unit isn't in the known conversion table.
+function applyUnitConversion(origVal, unitStr) {
+  const unitObj = parseUnitStr(unitStr);
+  if (!Object.keys(unitObj).length) return null;
+  const factor = getUnitConversionFactor(unitObj);
+  if (factor === null) return null;
+  const siUnitObj = toSIUnitObj(unitObj);
+  if (!siUnitObj) return null;
+  return { siVal: origVal * factor, siUnitStr: unitObjToStr(siUnitObj) };
+}
+
 // ── LaTeX tokeniser + parser ────────────────────────────────
 function tokenize(expr) {
   const toks = [];
@@ -881,19 +951,20 @@ function renderVarChipContent(chip) {
     chip.innerHTML = inner;
     chip.title = `${name} = ${expr} = ${fmtNum(val)}${unit ? ' ' + unit : ''}`;
   } else if (unit) {
-    // Render:  name = value unit  (no click-to-edit; double-click chip to re-enter)
+    // Render:  name = origValue unit  (show the value the user typed, not the SI-converted internal value)
+    const displayVal = chip.dataset.varExpr || fmtNum(val);
     try {
       const nameLatex = nameToLatex(name);
-      const valLatex  = numToLatex(fmtNum(val)) + unitToLatex(unit);
+      const valLatex  = numToLatex(displayVal) + unitToLatex(unit);
       const katexHtml = katex.renderToString(
         nameLatex + ' = ' + valLatex,
         { displayMode: false, throwOnError: false, output: 'html' }
       );
       chip.innerHTML = `<span class="vdc-name">${katexHtml}</span>`;
     } catch(e) {
-      chip.innerHTML = `<span class="vdc-name">${name} = </span><span class="vdc-val">${fmtNum(val)} ${unit}</span>`;
+      chip.innerHTML = `<span class="vdc-name">${name} = </span><span class="vdc-val">${displayVal} ${unit}</span>`;
     }
-    chip.title = `Variable "${name}" = ${fmtNum(val)} ${unit}`;
+    chip.title = `Variable "${name}" = ${displayVal} ${unit}`;
   } else {
     // Render:  name = <editable value>
     try {
@@ -915,7 +986,7 @@ function renderVarChipContent(chip) {
   }
 }
 
-function makeVarDefChip(name, val, expr, unit) {
+function makeVarDefChip(name, val, expr, unit, siUnit) {
   const chip = document.createElement('span');
   chip.contentEditable = 'false';
   chip.className = 'var-def-chip';
@@ -923,6 +994,7 @@ function makeVarDefChip(name, val, expr, unit) {
   chip.dataset.varVal  = String(val);
   if (expr && expr.trim() !== String(val)) chip.dataset.varExpr = expr.trim();
   if (unit) chip.dataset.varUnit = unit;
+  if (siUnit && siUnit !== unit) chip.dataset.varSiUnit = siUnit;
   renderVarChipContent(chip);
   return chip;
 }
@@ -1417,6 +1489,7 @@ function rebuildVars() {
       let name = chip.dataset.varName;
       const expr = chip.dataset.varExpr;
       const unit = chip.dataset.varUnit || '';
+      const siUnit = chip.dataset.varSiUnit || unit;
       if (!name) return;
       if (expr) {
         try {
@@ -1425,20 +1498,20 @@ function rebuildVars() {
             chip.dataset.varVal = String(v);
             renderVarChipContent(chip);
             vars[name] = v;
-            if (unit) varUnits[name] = unit;
+            if (unit) varUnits[name] = siUnit;
           }
         } catch(e) {
           const fallback = parseFloat(chip.dataset.varVal);
           if (!isNaN(fallback)) {
             vars[name] = fallback;
-            if (unit) varUnits[name] = unit;
+            if (unit) varUnits[name] = siUnit;
           }
         }
       } else {
         const val = parseFloat(chip.dataset.varVal);
         if (!isNaN(val)) {
           vars[name] = val;
-          if (unit) varUnits[name] = unit;
+          if (unit) varUnits[name] = siUnit;
         }
       }
     });
@@ -1489,17 +1562,21 @@ document.addEventListener('keydown', e => {
       const varName = isDesc ? m[2] : m[1];
       let exprStr = (isDesc ? m[3] : m[2]).trim();
       const prefix  = isDesc ? m[1] : '';
-      let val, unit = '';
+      let val, unit = '', siUnit = '';
       try {
         val = parseFloat(evalFormula(exprStr, vars).replace(/,/g, ''));
         if (isNaN(val)) throw new Error('NaN');
       } catch(err) {
         const ue = extractValueAndUnit(exprStr);
         if (!ue) return;
-        val = ue.val; unit = ue.unit; exprStr = ue.numStr;
+        const origNumStr = ue.numStr;
+        unit = ue.unit; exprStr = origNumStr;
+        const conv = applyUnitConversion(ue.val, unit);
+        if (conv) { val = conv.siVal; siUnit = conv.siUnitStr; }
+        else { val = ue.val; siUnit = unit; }
       }
       e.preventDefault();
-      commitVarDef(node, varName, val, exprStr, prefix, unit);
+      commitVarDef(node, varName, val, exprStr, prefix, unit, siUnit);
     }
   }
 }, true);
@@ -1551,17 +1628,22 @@ function commitFormula(ed) {
   if (varEndMatch) {
     const varName = varEndMatch[2];
     const prefix  = varEndMatch[1] || '';
-    let varVal, varUnit = '', varExpr = formula;
+    let varVal, varUnit = '', varSiUnit = '', varExpr = formula;
     try { varVal = parseFloat(evalFormula(formula, vars).replace(/,/g, '')); } catch(e) { varVal = NaN; }
     if (isNaN(varVal)) {
       const ue = extractValueAndUnit(formula);
-      if (ue) { varVal = ue.val; varUnit = ue.unit; varExpr = ue.numStr; }
+      if (ue) {
+        varUnit = ue.unit; varExpr = ue.numStr;
+        const conv = applyUnitConversion(ue.val, varUnit);
+        if (conv) { varVal = conv.siVal; varSiUnit = conv.siUnitStr; }
+        else { varVal = ue.val; varSiUnit = varUnit; }
+      }
     }
     if (!isNaN(varVal)) {
       const parent = node.parentNode;
       const frag = document.createDocumentFragment();
       if (prefix) frag.appendChild(document.createTextNode(prefix));
-      frag.appendChild(makeVarDefChip(varName, varVal, varExpr, varUnit));
+      frag.appendChild(makeVarDefChip(varName, varVal, varExpr, varUnit, varSiUnit));
       const spacer = document.createTextNode(' ');
       frag.appendChild(spacer);
       parent.replaceChild(frag, node);
@@ -1610,11 +1692,11 @@ document.addEventListener('dblclick', e => {
   }
 });
 
-function commitVarDef(textNode, name, val, expr, prefix, unit) {
+function commitVarDef(textNode, name, val, expr, prefix, unit, siUnit) {
   const parent = textNode.parentNode;
   const frag = document.createDocumentFragment();
   if (prefix) frag.appendChild(document.createTextNode(prefix));
-  frag.appendChild(makeVarDefChip(name, val, expr, unit));
+  frag.appendChild(makeVarDefChip(name, val, expr, unit, siUnit));
   const spacer = document.createTextNode('\u00A0');
   frag.appendChild(spacer);
   parent.replaceChild(frag, textNode);
