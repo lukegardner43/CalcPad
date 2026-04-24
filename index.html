@@ -562,11 +562,15 @@ const FUNS = {
   PERCENT: (p,w) => (p/w)*100,
 };
 
+const MATH_CONSTS = { pi: Math.PI };
+
 function evalFormula(raw, variables) {
+  // Built-in constants are available unless the user has defined a variable with the same name
+  const variables_ = { ...MATH_CONSTS, ...variables };
   let expr = raw.trim();
   // Normalise function names to uppercase so sqrt(), Sqrt(), SQRT() all work.
   // Only uppercases identifiers immediately followed by '(' that aren't variable names.
-  const varNames = new Set(Object.keys(variables));
+  const varNames = new Set(Object.keys(variables_));
   expr = expr.replace(/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*(?=\()/g, (m, name) => {
     let up = name.toUpperCase();
     // Don't uppercase if it's a known variable name
@@ -574,9 +578,9 @@ function evalFormula(raw, variables) {
     return FUNS[up] ? up + m.slice(name.length) : m;
   });
   expr = expr.replace(/\^/g, '**');
-  const vnames = Object.keys(variables).sort((a,b) => b.length - a.length);
+  const vnames = Object.keys(variables_).sort((a,b) => b.length - a.length);
   for (const vn of vnames)
-    expr = expr.replace(new RegExp(`\\b${vn}\\b`, 'g'), `(${variables[vn]})`);
+    expr = expr.replace(new RegExp(`\\b${vn}\\b`, 'g'), `(${variables_[vn]})`);
   let safe = expr.replace(/\b([A-Z_]+)\s*\(/g, (_,nm) => {
     if (FUNS[nm]) return `__F.${nm}(`;
     throw new Error(`Unknown: ${nm}`);
