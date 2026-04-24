@@ -589,7 +589,7 @@ function evalFormula(raw, variables) {
 function fmtNum(n) {
   const r = Math.round(n * 1e10) / 1e10;
   if (Number.isInteger(r)) return r.toLocaleString('en-GB');
-  return parseFloat(r.toFixed(8)).toString();
+  return parseFloat(r.toFixed(2)).toString();
 }
 
 function usedVars(formula) {
@@ -1035,11 +1035,12 @@ function startEditVarChip(chip) {
   inp.addEventListener('blur', commit);
 }
 
-function makeFormulaChip(formula, result, isError) {
+function makeFormulaChip(formula, result, isError, outputUnit) {
   const chip = document.createElement('span');
   chip.contentEditable = 'false';
   chip.className = 'formula-chip' + (isError ? ' error' : '');
   chip.dataset.formula = formula;
+  if (outputUnit) chip.dataset.formulaUnit = outputUnit;
   setFormulaContent(chip, formula, result, isError);
   return chip;
 }
@@ -1051,7 +1052,8 @@ function startEditFormulaChip(chip) {
   // Remove the trailing non-breaking space spacer so cursor lands in the text node
   const next = chip.nextSibling;
   if (next && next.nodeType === Node.TEXT_NODE && next.textContent === ' ') next.remove();
-  const textNode = document.createTextNode('=' + formula);
+  const outputUnit = chip.dataset.formulaUnit || '';
+  const textNode = document.createTextNode('=' + formula + (outputUnit ? ' [' + outputUnit + ']' : ''));
   chip.parentNode.replaceChild(textNode, chip);
   const range = document.createRange();
   range.setStart(textNode, textNode.length);
@@ -1088,20 +1090,33 @@ function setFormulaContent(chip, formula, result, isError) {
     chip.title = `Error: ${result}`;
     return;
   }
+  const outputUnit = chip.dataset.formulaUnit || '';
   try {
     const lhs = toLatex(formula);
-    const rhs = numToLatex(result);
     const sub = toLatexSubstituted(formula, vars, varUnits);
-    const resUnit = evalUnitExpr(formula, varUnits);
-    const unitSuffix = resUnit && Object.keys(resUnit).length ? unitObjToLatex(resUnit) : '';
-    const latex = lhs + (sub ? ' = ' + sub : '') + ' = ' + rhs + unitSuffix;
+    let displayVal = result;
+    let unitSuffix = '';
+    if (outputUnit) {
+      // Convert SI result to the user-specified output unit
+      const unitObj = parseUnitStr(outputUnit);
+      const factor = getUnitConversionFactor(unitObj);
+      if (factor !== null) {
+        displayVal = fmtNum(parseFloat(result.replace(/,/g, '')) / factor);
+      }
+      unitSuffix = unitToLatex(outputUnit);
+    } else {
+      const resUnit = evalUnitExpr(formula, varUnits);
+      unitSuffix = resUnit && Object.keys(resUnit).length ? unitObjToLatex(resUnit) : '';
+    }
+    const rhs = numToLatex(displayVal) + unitSuffix;
+    const latex = lhs + (sub ? ' = ' + sub : '') + ' = ' + rhs;
     chip.innerHTML = katex.renderToString(latex, {
       displayMode: false, throwOnError: false, output: 'html'
     });
   } catch(e) {
-    chip.innerHTML = `<span style="font-style:italic">=${formula} = ${result}</span>`;
+    chip.innerHTML = `<span style="font-style:italic">=${formula} = ${result}${outputUnit ? ' ' + outputUnit : ''}</span>`;
   }
-  chip.title = `=${formula} = ${result}`;
+  chip.title = `=${formula} = ${result}${outputUnit ? ' ' + outputUnit : ''}`;
 }
 
 
@@ -1626,12 +1641,17 @@ function commitFormula(ed) {
   const text = node.textContent;
   let eqIdx = text.lastIndexOf('=');
   if (eqIdx === -1) { cancelFormula(); return; }
-  const formula = text.slice(eqIdx + 1).trim();
+  let formula = text.slice(eqIdx + 1).trim();
   if (!formula) { cancelFormula(); return; }
+  // Extract optional output unit spec:  "formula [mm]"  →  formula="formula", outputUnit="mm"
+  let outputUnit = '';
+  const unitSpecMatch = formula.match(/^(.*?)\s*\[([^\]]+)\]\s*$/);
+  if (unitSpecMatch) { formula = unitSpecMatch[1].trim(); outputUnit = unitSpecMatch[2].trim(); }
   // If the text before = ends with an identifier, treat this as a variable definition
   // e.g. "shear force V = 5"  or plain  "V = 5"
+  // Skip var-def path when an output unit is specified — that always makes a formula chip.
   const before = text.slice(0, eqIdx);
-  const varEndMatch = before.trimEnd().match(/^([\s\S]*\s)?([a-zA-Z][a-zA-Z0-9_]*)$/);
+  const varEndMatch = !outputUnit && before.trimEnd().match(/^([\s\S]*\s)?([a-zA-Z][a-zA-Z0-9_]*)$/);
   if (varEndMatch) {
     const varName = varEndMatch[2];
     const prefix  = varEndMatch[1] || '';
@@ -1669,7 +1689,7 @@ function commitFormula(ed) {
   const parent = node.parentNode;
   const frag = document.createDocumentFragment();
   if (before) frag.appendChild(document.createTextNode(before));
-  frag.appendChild(makeFormulaChip(formula, result, isError));
+  frag.appendChild(makeFormulaChip(formula, result, isError, outputUnit));
   const spacer = document.createTextNode('\u00A0');
   frag.appendChild(spacer);
   parent.replaceChild(frag, node);
