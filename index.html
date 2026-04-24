@@ -202,7 +202,8 @@ body{
 .formula-chip{display:inline-flex;flex-wrap:wrap;align-items:baseline;max-width:100%;cursor:default;user-select:none;vertical-align:middle}
 .formula-chip .katex{font-size:1em}
 .formula-chip.error{color:var(--rubine);font-style:italic}
-.feq{padding:0 0.15em;white-space:nowrap}
+.fseg{display:inline-flex;align-items:baseline}
+.feq{padding-right:0.15em}
 
 /* Table styles */
 .calc-table{width:100%;border-collapse:collapse;margin:4px 0;font-size:11px;table-layout:fixed}
@@ -705,6 +706,23 @@ const UNIT_SI_BASE = {
   s: 's', ms: 's', min: 's', hr: 's',
   deg: 'rad', rad: 'rad',
 };
+// Convert a unit-object to SI base symbols, e.g. {mm:4} → {m:4}, {kN:1,mm:-2} → {N:1,m:-2}
+function unitObjToSIBase(u) {
+  if (!u) return {};
+  const r = {};
+  for (const [sym, exp] of Object.entries(u)) {
+    const base = UNIT_SI_BASE[sym] || sym;
+    r[base] = (r[base] || 0) + exp;
+    if (!r[base]) delete r[base];
+  }
+  return r;
+}
+// Compare two unit objects for equality (same keys and exponents)
+function unitObjEq(a, b) {
+  if (!a || !b) return false;
+  const ka = Object.keys(a), kb = Object.keys(b);
+  return ka.length === kb.length && ka.every(k => a[k] === b[k]);
+}
 // Serialise a unit-object back to a string, e.g. {N:1,m:-2} → "N/m^2"
 function unitObjToStr(u) {
   if (!u) return '';
@@ -947,13 +965,22 @@ function renderVarChipContent(chip) {
   if (expr) {
     // Render:  name = <LaTeX expression> [ = substituted ] = value [unit]
     const displayUnit = chip.dataset.varDisplayUnit || '';
+    const exprUnit = evalUnitExpr(expr, varUnits);
+    // Check for unit dimension mismatch when a display unit is specified
+    if (displayUnit && exprUnit && Object.keys(exprUnit).length) {
+      const specBase = unitObjToSIBase(parseUnitStr(displayUnit));
+      if (Object.keys(specBase).length && !unitObjEq(exprUnit, specBase)) {
+        chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">${name}: unit mismatch [${displayUnit}] vs [${unitObjToStr(exprUnit)}]</span>`;
+        chip.title = `Unit mismatch: formula gives [${unitObjToStr(exprUnit)}] but [${displayUnit}] was specified`;
+        return;
+      }
+    }
     let exprUnitSuffix, displayValStr;
     if (displayUnit) {
       const dFactor = getUnitConversionFactor(parseUnitStr(displayUnit));
       displayValStr = fmtNumDisplay(dFactor !== null ? val / dFactor : val);
       exprUnitSuffix = unitToLatex(displayUnit);
     } else {
-      const exprUnit = evalUnitExpr(expr, varUnits);
       exprUnitSuffix = exprUnit && Object.keys(exprUnit).length ? unitObjToLatex(exprUnit) : (unit ? unitToLatex(unit) : '');
       displayValStr = fmtNumDisplay(val);
     }
@@ -965,8 +992,8 @@ function renderVarChipContent(chip) {
       const kx = s => katex.renderToString(s, {displayMode: false, throwOnError: false, output: 'html'});
       inner =
         `<span class="fseg">${kx(nameLatex + ' = ' + latexExpr)}</span>` +
-        (sub ? `<span class="feq"> = </span><span class="fseg">${kx(sub)}</span>` : '') +
-        `<span class="feq"> = </span><span class="fseg">${kx(latexVal)}</span>`;
+        (sub ? `<span class="fseg"><span class="feq"> = </span>${kx(sub)}</span>` : '') +
+        `<span class="fseg"><span class="feq"> = </span>${kx(latexVal)}</span>`;
     } catch(e) {
       inner = `<span class="vdc-name">${name} = ${expr} = </span><span class="vdc-val">${displayValStr}${displayUnit ? ' ' + displayUnit : (unit ? ' ' + unit : '')}</span>`;
     }
@@ -1121,24 +1148,33 @@ function setFormulaContent(chip, formula, result, isError) {
     const sub = toLatexSubstituted(formula, vars, varUnits);
     // Use full-precision float from result string so 2dp rounding doesn't corrupt unit conversion
     const rawSI = parseFloat(result.replace(/,/g, ''));
+    const resUnit = evalUnitExpr(formula, varUnits);
     let displayVal, unitSuffix = '';
     if (outputUnit) {
-      // Convert SI result to the user-specified output unit
+      // Check that the specified unit is dimensionally compatible with the formula result
+      if (resUnit && Object.keys(resUnit).length) {
+        const specBase = unitObjToSIBase(parseUnitStr(outputUnit));
+        if (Object.keys(specBase).length && !unitObjEq(resUnit, specBase)) {
+          chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">unit mismatch: result is [${unitObjToStr(resUnit)}] not [${outputUnit}]</span>`;
+          chip.className = 'formula-chip error';
+          chip.title = `Unit mismatch: formula gives [${unitObjToStr(resUnit)}] but [${outputUnit}] was specified`;
+          return;
+        }
+      }
       const unitObj = parseUnitStr(outputUnit);
       const factor = getUnitConversionFactor(unitObj);
       displayVal = fmtNumDisplay(factor !== null ? rawSI / factor : rawSI);
       unitSuffix = unitToLatex(outputUnit);
     } else {
       displayVal = fmtNumDisplay(rawSI);
-      const resUnit = evalUnitExpr(formula, varUnits);
       unitSuffix = resUnit && Object.keys(resUnit).length ? unitObjToLatex(resUnit) : '';
     }
     const rhs = numToLatex(displayVal) + unitSuffix;
     const kx = s => katex.renderToString(s, {displayMode: false, throwOnError: false, output: 'html'});
     chip.innerHTML =
       `<span class="fseg">${kx(lhs)}</span>` +
-      (sub ? `<span class="feq"> = </span><span class="fseg">${kx(sub)}</span>` : '') +
-      `<span class="feq"> = </span><span class="fseg">${kx(rhs)}</span>`;
+      (sub ? `<span class="fseg"><span class="feq"> = </span>${kx(sub)}</span>` : '') +
+      `<span class="fseg"><span class="feq"> = </span>${kx(rhs)}</span>`;
   } catch(e) {
     chip.innerHTML = `<span style="font-style:italic">=${formula} = ${result}${outputUnit ? ' ' + outputUnit : ''}</span>`;
   }
