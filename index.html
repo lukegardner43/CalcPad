@@ -774,7 +774,6 @@ function tokenize(expr) {
 function nameToLatex(name) {
   let up = name.toUpperCase();
   if (up === 'PI') return '\\pi';
-  if (up === 'E')  return 'e';
   let idx = name.indexOf('_');
   if (idx === -1) {
     return name.length === 1 ? name : '\\text{' + name + '}';
@@ -1544,7 +1543,8 @@ function rebuildVars() {
             chip.dataset.varVal = String(v);
             renderVarChipContent(chip);
             vars[name] = v;
-            if (unit) varUnits[name] = siUnit;
+            if (unit) { varUnits[name] = siUnit; }
+            else { const inf = evalUnitExpr(expr, varUnits); if (inf && Object.keys(inf).length) varUnits[name] = unitObjToStr(inf); }
           }
         } catch(e) {
           const fallback = parseFloat(chip.dataset.varVal);
@@ -1616,6 +1616,10 @@ document.addEventListener('keydown', e => {
       try {
         val = parseFloat(evalFormula(exprStr, vars).replace(/,/g, ''));
         if (isNaN(val)) throw new Error('NaN');
+        if (!unit) {
+          const inferred = evalUnitExpr(exprStr, varUnits);
+          if (inferred && Object.keys(inferred).length) { siUnit = unit = unitObjToStr(inferred); }
+        }
       } catch(err) {
         const ue = extractValueAndUnit(exprStr);
         if (!ue) return;
