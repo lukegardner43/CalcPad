@@ -790,18 +790,36 @@ function tokenize(expr) {
   return toks;
 }
 
+const GREEK = {
+  alpha:'alpha', beta:'beta', gamma:'gamma', delta:'delta',
+  epsilon:'epsilon', varepsilon:'varepsilon', zeta:'zeta', eta:'eta',
+  theta:'theta', vartheta:'vartheta', iota:'iota', kappa:'kappa',
+  lambda:'lambda', mu:'mu', nu:'nu', xi:'xi',
+  pi:'pi', varpi:'varpi', rho:'rho', varrho:'varrho',
+  sigma:'sigma', varsigma:'varsigma', tau:'tau', upsilon:'upsilon',
+  phi:'phi', varphi:'varphi', chi:'chi', psi:'psi', omega:'omega',
+};
+
 function nameToLatex(name) {
-  let up = name.toUpperCase();
-  if (up === 'PI') return '\\pi';
   let idx = name.indexOf('_');
-  if (idx === -1) {
-    return name.length === 1 ? name : '\\text{' + name + '}';
+  const base = idx === -1 ? name : name.slice(0, idx);
+  const sub  = idx === -1 ? null  : name.slice(idx + 1);
+
+  let baseLatex;
+  const greekCmd = GREEK[base.toLowerCase()];
+  if (greekCmd) {
+    // Uppercase Greek when name starts with a capital letter
+    const isUpper = /^[A-Z]/.test(base);
+    const cmd = isUpper ? greekCmd[0].toUpperCase() + greekCmd.slice(1) : greekCmd;
+    baseLatex = '\\' + cmd;
+  } else {
+    baseLatex = base.length === 1 ? base : '\\text{' + base + '}';
   }
-  const base = name.slice(0, idx);
-  const sub  = name.slice(idx + 1);
-  const baseL = base.length === 1 ? base : '\\text{' + base + '}';
-  const subL  = nameToLatex(sub);
-  return baseL + '_{' + subL + '}';
+
+  if (!sub) return baseLatex;
+  // Numeric-only subscripts render as plain digits; others recurse
+  const subLatex = /^\d+$/.test(sub) ? sub : nameToLatex(sub);
+  return baseLatex + '_{' + subLatex + '}';
 }
 
 function toLatex(rawFormula, subsMap) {
