@@ -910,6 +910,9 @@ function setFormulaContent(chip, formula, result, isError) {
 // The expression part can be a number OR a formula using other variables/functions.
 // We require the name to not start with a digit, and the = to not be == or >=/<= etc.
 const VAR_RE = /^([a-zA-Z][a-zA-Z0-9_]*)\s*=(?!=)\s*(.+)$/;
+// Match:  <description text> name = <expression>  e.g. "shear force V = 5"
+// Greedy .* ensures the variable name is the LAST identifier before =.
+const VAR_DESC_RE = /^(.*\s)([a-zA-Z][a-zA-Z0-9_]*)\s*=(?!=)\s*(.+)$/;
 let formulaBuffer = null;
 
 
@@ -1347,16 +1350,22 @@ document.addEventListener('keydown', e => {
     if (node.nodeType !== Node.TEXT_NODE) return;
     if (!ed.contains(node)) return;
     const fullText = node.textContent.trim();
-    const m = fullText.match(VAR_RE);
+    // Try plain  "varName = expr"  first, then  "description text varName = expr"
+    const m = fullText.match(VAR_RE) || fullText.match(VAR_DESC_RE);
     if (m) {
-      const exprStr = m[2].trim();
+      // VAR_RE:      m[1]=name  m[2]=expr  (no prefix)
+      // VAR_DESC_RE: m[1]=prefix  m[2]=name  m[3]=expr
+      const isDesc = m.length === 4 && m[3] !== undefined;
+      const varName = isDesc ? m[2] : m[1];
+      const exprStr = (isDesc ? m[3] : m[2]).trim();
+      const prefix  = isDesc ? m[1] : '';
       let val;
       try {
         val = parseFloat(evalFormula(exprStr, vars).replace(/,/g, ''));
         if (isNaN(val)) throw new Error('NaN');
       } catch(err) { return; }
       e.preventDefault();
-      commitVarDef(node, m[1], val, exprStr);
+      commitVarDef(node, varName, val, exprStr, prefix);
     }
   }
 }, true);
@@ -1401,10 +1410,35 @@ function commitFormula(ed) {
   if (eqIdx === -1) { cancelFormula(); return; }
   const formula = text.slice(eqIdx + 1).trim();
   if (!formula) { cancelFormula(); return; }
+  // If the text before = ends with an identifier, treat this as a variable definition
+  // e.g. "shear force V = 5"  or plain  "V = 5"
+  const before = text.slice(0, eqIdx);
+  const varEndMatch = before.trimEnd().match(/^([\s\S]*\s)?([a-zA-Z][a-zA-Z0-9_]*)$/);
+  if (varEndMatch) {
+    const varName = varEndMatch[2];
+    const prefix  = varEndMatch[1] || '';
+    let varVal;
+    try { varVal = parseFloat(evalFormula(formula, vars).replace(/,/g, '')); } catch(e) { varVal = NaN; }
+    if (!isNaN(varVal)) {
+      const parent = node.parentNode;
+      const frag = document.createDocumentFragment();
+      if (prefix) frag.appendChild(document.createTextNode(prefix));
+      frag.appendChild(makeVarDefChip(varName, varVal, formula));
+      const spacer = document.createTextNode(' ');
+      frag.appendChild(spacer);
+      parent.replaceChild(frag, node);
+      const r = document.createRange();
+      r.setStartAfter(spacer); r.collapse(true);
+      sel.removeAllRanges(); sel.addRange(r);
+      formulaBuffer = null;
+      rebuildVars();
+      return;
+    }
+  }
+
   let result, isError = false;
   try { result = evalFormula(formula, vars); }
   catch(ex) { result = ex.message || 'Error'; isError = true; }
-  let before = text.slice(0, eqIdx);
   const parent = node.parentNode;
   const frag = document.createDocumentFragment();
   if (before) frag.appendChild(document.createTextNode(before));
@@ -1438,9 +1472,10 @@ document.addEventListener('dblclick', e => {
   }
 });
 
-function commitVarDef(textNode, name, val, expr) {
+function commitVarDef(textNode, name, val, expr, prefix) {
   const parent = textNode.parentNode;
   const frag = document.createDocumentFragment();
+  if (prefix) frag.appendChild(document.createTextNode(prefix));
   frag.appendChild(makeVarDefChip(name, val, expr));
   const spacer = document.createTextNode('\u00A0');
   frag.appendChild(spacer);
