@@ -199,7 +199,7 @@ body{
 .vdc-val:hover{color:var(--rubine);border-bottom-color:var(--rubine)}
 .vdc-edit-input{border:none;border-bottom:1px solid var(--rubine);outline:none;background:transparent;
   font-family:Arial,sans-serif;font-size:11px;font-style:italic;color:var(--dark);width:60px;padding:0 2px}
-.formula-chip{display:inline;cursor:default;user-select:none;vertical-align:middle}
+.formula-chip{display:inline-block;max-width:100%;overflow-x:auto;cursor:default;user-select:none;vertical-align:middle}
 .formula-chip .katex{font-size:1em}
 .formula-chip.error{color:var(--rubine);font-style:italic}
 
@@ -607,7 +607,9 @@ function usedVars(formula) {
 }
 
 function unitToLatex(unit) {
-  return '\\,\\text{' + unit.replace(/[{}\\]/g, '') + '}';
+  const obj = parseUnitStr(unit);
+  if (Object.keys(obj).length) return unitObjToLatex(obj);
+  return '\\,\\text{' + unit.replace(/[{}\\^_]/g, '') + '}';
 }
 
 // Split "10mm" or "10 m/s" into {val:10, numStr:"10", unit:"mm"/"m/s"}, or null.
