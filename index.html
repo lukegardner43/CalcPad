@@ -1562,6 +1562,7 @@ requestAnimationFrame(() => {
   });
 });
 
+loadFromLocalStorage();
 rebuildVars();
 
 // ── Toolbar helpers ───────────────────────────────────────────
@@ -1632,6 +1633,7 @@ function rebuildVars() {
   });
   recalcAll();
   renderSidebar();
+  autoSave();
 }
 
 function recalcAll() {
@@ -1707,6 +1709,7 @@ document.addEventListener('input', e => {
   const ca = e.target.closest('.calc-area');
   if (!ca) return;
   setActiveEditor(ca);
+  isDirty = true; autoSave();
   if (formulaBuffer !== null) {
     const sel = window.getSelection();
     if (!sel.rangeCount) return;
@@ -2111,6 +2114,30 @@ function buildSaveData() {
   getAllEditors().forEach((ed, i) => pages.push(ed.innerHTML));
   return JSON.stringify({ version:2, meta:collectMeta(), pages, savedAt:new Date().toISOString() }, null, 2);
 }
+
+const LS_KEY = 'calcpad_autosave';
+let _autoSaveTimer = null;
+function autoSave() {
+  clearTimeout(_autoSaveTimer);
+  _autoSaveTimer = setTimeout(() => {
+    try { localStorage.setItem(LS_KEY, buildSaveData()); } catch(e) {}
+  }, 500);
+}
+function loadFromLocalStorage() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    const pages = data.pages || [data.content || ''];
+    for (let i = pageCount - 1; i >= 1; i--) { const w = document.getElementById('pageWrap'+i); if(w)w.remove(); }
+    pageCount = 1;
+    document.getElementById('editor').innerHTML = pages[0] || '';
+    for (let i = 1; i < pages.length; i++) { const newEd = addPage(); newEd.innerHTML = pages[i] || ''; }
+    restoreMeta(data.meta || {});
+    updateMirrorHeaders();
+  } catch(e) {}
+}
+
 function triggerDownload(data, filename) {
   const blob = new Blob([data], {type:'application/json'});
   const url = URL.createObjectURL(blob);
@@ -2129,6 +2156,7 @@ function fileNew() {
   pageCount = 1;
   restoreMeta({}); document.getElementById('m-date').value = new Date().toLocaleDateString('en-GB');
   currentFileName = 'Untitled'; isDirty = false; document.title = 'Untitled — Perega';
+  try { localStorage.removeItem(LS_KEY); } catch(e) {}
   rebuildVars();
 }
 function fileSave() { closeFileMenu(); if (currentFileName === 'Untitled') { fileSaveAs(); return; } triggerDownload(buildSaveData(), currentFileName + '.perega'); isDirty = false; }
