@@ -952,7 +952,7 @@ function renderVarChipContent(chip) {
     chip.title = `${name} = ${expr} = ${fmtNum(val)}${unit ? ' ' + unit : ''}`;
   } else if (unit) {
     // Render:  name = origValue unit  (show the value the user typed, not the SI-converted internal value)
-    const displayVal = chip.dataset.varExpr || fmtNum(val);
+    const displayVal = chip.dataset.varOrigNum || fmtNum(val);
     try {
       const nameLatex = nameToLatex(name);
       const valLatex  = numToLatex(displayVal) + unitToLatex(unit);
@@ -992,9 +992,16 @@ function makeVarDefChip(name, val, expr, unit, siUnit) {
   chip.className = 'var-def-chip';
   chip.dataset.varName = name;
   chip.dataset.varVal  = String(val);
-  if (expr && expr.trim() !== String(val)) chip.dataset.varExpr = expr.trim();
+  // Only store varExpr for real formula expressions — plain numbers must NOT go here
+  // or rebuildVars will re-evaluate them and overwrite the SI-converted value.
+  const isFormulaExpr = expr && !/^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(expr.trim());
+  if (isFormulaExpr) chip.dataset.varExpr = expr.trim();
   if (unit) chip.dataset.varUnit = unit;
   if (siUnit && siUnit !== unit) chip.dataset.varSiUnit = siUnit;
+  // For unit variables store the original typed number separately for display/editing
+  if (unit && !isFormulaExpr && expr && expr.trim() !== String(val)) {
+    chip.dataset.varOrigNum = expr.trim();
+  }
   renderVarChipContent(chip);
   return chip;
 }
@@ -1058,7 +1065,7 @@ function startEditFormulaChip(chip) {
 function startEditVarDefChip(chip) {
   formulaBuffer = null;
   const name = chip.dataset.varName;
-  const expr = chip.dataset.varExpr || chip.dataset.varVal;
+  const expr = chip.dataset.varExpr || chip.dataset.varOrigNum || chip.dataset.varVal;
   const unit = chip.dataset.varUnit || '';
   if (!name) return;
   // Remove the trailing non-breaking space spacer so cursor lands in the text node
