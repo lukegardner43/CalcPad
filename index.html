@@ -514,6 +514,7 @@ body{
 
 let editor = document.getElementById('editor');
 let vars = {};
+let varUnits = {};
 
 // ── Variable store ─────────────────────────────────────────
 
@@ -595,6 +596,19 @@ function usedVars(formula) {
   return Object.keys(vars).filter(n => new RegExp(`\\b${n}\\b`).test(formula));
 }
 
+function unitToLatex(unit) {
+  return '\\,\\text{' + unit.replace(/[{}\\]/g, '') + '}';
+}
+
+// Split "10 m/s" into {val:10, numStr:"10", unit:"m/s"}, or null if not number+unit.
+function extractValueAndUnit(exprStr) {
+  const m = exprStr.trim().match(/^([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s+(\S.*)$/);
+  if (!m) return null;
+  const numVal = parseFloat(m[1]);
+  if (isNaN(numVal)) return null;
+  return { val: numVal, numStr: m[1], unit: m[2].trim() };
+}
+
 // ── LaTeX tokeniser + parser ────────────────────────────────
 function tokenize(expr) {
   const toks = [];
@@ -632,7 +646,7 @@ function nameToLatex(name) {
   return baseL + '_{' + subL + '}';
 }
 
-function toLatex(rawFormula) {
+function toLatex(rawFormula, subsMap) {
   let formula = rawFormula;
   // Normalise function names to uppercase before tokenising
   formula = formula.replace(/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*(?=\()/g, (m, name) => {
@@ -738,6 +752,11 @@ function toLatex(rawFormula) {
         eat(')');
         return latexFunc(tok.v.toUpperCase(), args);
       }
+      if (subsMap && Object.prototype.hasOwnProperty.call(subsMap, tok.v)) {
+        const entry = subsMap[tok.v];
+        if (entry.unit) return '\\left(' + entry.val + unitToLatex(entry.unit) + '\\right)';
+        return entry.val;
+      }
       return latexIdent(tok.v);
     }
     consume();
@@ -746,6 +765,25 @@ function toLatex(rawFormula) {
 
   try { return parseExpr(); }
   catch(e) { return formula; }
+}
+
+// Return a LaTeX string with variables substituted (with optional units).
+// Returns null if the formula contains none of the variables.
+function toLatexSubstituted(formula, variables, varUnitsMap) {
+  const vnames = Object.keys(variables);
+  if (!vnames.length) return null;
+  const subsMap = {};
+  let hasVars = false;
+  for (const vn of vnames) {
+    if (new RegExp(`\\b${vn}\\b`).test(formula)) {
+      const valStr = fmtNum(variables[vn]).replace(/,/g, '');
+      const unit = varUnitsMap && varUnitsMap[vn];
+      subsMap[vn] = { val: valStr, unit: unit || null };
+      hasVars = true;
+    }
+  }
+  if (!hasVars) return null;
+  try { return toLatex(formula, subsMap); } catch(e) { return null; }
 }
 
 function numToLatex(s) {
@@ -762,24 +800,40 @@ function renderVarChipContent(chip) {
   let name  = chip.dataset.varName;
   const val   = parseFloat(chip.dataset.varVal);
   const expr  = chip.dataset.varExpr;
+  const unit  = chip.dataset.varUnit || '';
 
   let inner = '';
 
   if (expr) {
-    // Render:  name = <LaTeX expression> = value
+    // Render:  name = <LaTeX expression> [ = substituted ] = value [unit]
     try {
       const latexExpr = toLatex(expr);
-      const latexVal  = numToLatex(fmtNum(val));
+      const latexVal  = numToLatex(fmtNum(val)) + (unit ? unitToLatex(unit) : '');
       const nameLatex = nameToLatex(name);
+      const sub = toLatexSubstituted(expr, vars, varUnits);
       inner = katex.renderToString(
         nameLatex + ' = ' + latexExpr + ' = ' + latexVal,
         { displayMode: false, throwOnError: false, output: 'html' }
       );
     } catch(e) {
-      inner = `<span class="vdc-name">${name} = ${expr} = </span><span class="vdc-val">${fmtNum(val)}</span>`;
+      inner = `<span class="vdc-name">${name} = ${expr} = </span><span class="vdc-val">${fmtNum(val)}${unit ? ' ' + unit : ''}</span>`;
     }
     chip.innerHTML = inner;
-    chip.title = `${name} = ${expr} = ${fmtNum(val)}`;
+    chip.title = `${name} = ${expr} = ${fmtNum(val)}${unit ? ' ' + unit : ''}`;
+  } else if (unit) {
+    // Render:  name = value unit  (no click-to-edit; double-click chip to re-enter)
+    try {
+      const nameLatex = nameToLatex(name);
+      const valLatex  = numToLatex(fmtNum(val)) + unitToLatex(unit);
+      const katexHtml = katex.renderToString(
+        nameLatex + ' = ' + valLatex,
+        { displayMode: false, throwOnError: false, output: 'html' }
+      );
+      chip.innerHTML = `<span class="vdc-name">${katexHtml}</span>`;
+    } catch(e) {
+      chip.innerHTML = `<span class="vdc-name">${name} = </span><span class="vdc-val">${fmtNum(val)} ${unit}</span>`;
+    }
+    chip.title = `Variable "${name}" = ${fmtNum(val)} ${unit}`;
   } else {
     // Render:  name = <editable value>
     try {
@@ -801,13 +855,14 @@ function renderVarChipContent(chip) {
   }
 }
 
-function makeVarDefChip(name, val, expr) {
+function makeVarDefChip(name, val, expr, unit) {
   const chip = document.createElement('span');
   chip.contentEditable = 'false';
   chip.className = 'var-def-chip';
   chip.dataset.varName = name;
   chip.dataset.varVal  = String(val);
   if (expr && expr.trim() !== String(val)) chip.dataset.varExpr = expr.trim();
+  if (unit) chip.dataset.varUnit = unit;
   renderVarChipContent(chip);
   return chip;
 }
@@ -851,8 +906,12 @@ function makeFormulaChip(formula, result, isError) {
 }
 
 function startEditFormulaChip(chip) {
+  formulaBuffer = null;
   const formula = chip.dataset.formula;
   if (!formula) return;
+  // Remove the trailing non-breaking space spacer so cursor lands in the text node
+  const next = chip.nextSibling;
+  if (next && next.nodeType === Node.TEXT_NODE && next.textContent === ' ') next.remove();
   const textNode = document.createTextNode('=' + formula);
   chip.parentNode.replaceChild(textNode, chip);
   const range = document.createRange();
@@ -861,14 +920,20 @@ function startEditFormulaChip(chip) {
   const sel = window.getSelection();
   sel.removeAllRanges();
   sel.addRange(range);
-  formulaBuffer = formula;
+  formulaBuffer = '';
 }
 
 function startEditVarDefChip(chip) {
+  formulaBuffer = null;
   const name = chip.dataset.varName;
   const expr = chip.dataset.varExpr || chip.dataset.varVal;
+  const unit = chip.dataset.varUnit || '';
   if (!name) return;
-  const textNode = document.createTextNode(name + ' = ' + expr);
+  // Remove the trailing non-breaking space spacer so cursor lands in the text node
+  const next = chip.nextSibling;
+  if (next && next.nodeType === Node.TEXT_NODE && next.textContent === ' ') next.remove();
+  const editText = name + ' = ' + expr + (unit ? ' ' + unit : '');
+  const textNode = document.createTextNode(editText);
   chip.parentNode.replaceChild(textNode, chip);
   const range = document.createRange();
   range.setStart(textNode, textNode.length);
@@ -876,7 +941,6 @@ function startEditVarDefChip(chip) {
   const sel = window.getSelection();
   sel.removeAllRanges();
   sel.addRange(range);
-  rebuildVars();
 }
 
 function setFormulaContent(chip, formula, result, isError) {
@@ -888,7 +952,9 @@ function setFormulaContent(chip, formula, result, isError) {
   try {
     const lhs = toLatex(formula);
     const rhs = numToLatex(result);
-    chip.innerHTML = katex.renderToString(lhs + ' = ' + rhs, {
+    const sub = toLatexSubstituted(formula, vars, varUnits);
+    const latex = lhs + (sub ? ' = ' + sub : '') + ' = ' + rhs;
+    chip.innerHTML = katex.renderToString(latex, {
       displayMode: false, throwOnError: false, output: 'html'
     });
   } catch(e) {
@@ -1280,10 +1346,12 @@ function getAllEditors() {
 // Override rebuildVars to scan all editors
 function rebuildVars() {
   vars = {};
+  varUnits = {};
   getAllEditors().forEach(ed => {
     ed.querySelectorAll('.var-def-chip').forEach(chip => {
       let name = chip.dataset.varName;
       const expr = chip.dataset.varExpr;
+      const unit = chip.dataset.varUnit || '';
       if (!name) return;
       if (expr) {
         try {
@@ -1292,14 +1360,21 @@ function rebuildVars() {
             chip.dataset.varVal = String(v);
             renderVarChipContent(chip);
             vars[name] = v;
+            if (unit) varUnits[name] = unit;
           }
         } catch(e) {
           const fallback = parseFloat(chip.dataset.varVal);
-          if (!isNaN(fallback)) vars[name] = fallback;
+          if (!isNaN(fallback)) {
+            vars[name] = fallback;
+            if (unit) varUnits[name] = unit;
+          }
         }
       } else {
         const val = parseFloat(chip.dataset.varVal);
-        if (!isNaN(val)) vars[name] = val;
+        if (!isNaN(val)) {
+          vars[name] = val;
+          if (unit) varUnits[name] = unit;
+        }
       }
     });
   });
@@ -1340,16 +1415,26 @@ document.addEventListener('keydown', e => {
     if (node.nodeType !== Node.TEXT_NODE) return;
     if (!ed.contains(node)) return;
     const fullText = node.textContent.trim();
-    const m = fullText.match(VAR_RE);
+    // Try plain  "varName = expr"  first, then  "description text varName = expr"
+    const m = fullText.match(VAR_RE) || fullText.match(VAR_DESC_RE);
     if (m) {
-      const exprStr = m[2].trim();
-      let val;
+      // VAR_RE:      m[1]=name  m[2]=expr  (no prefix)
+      // VAR_DESC_RE: m[1]=prefix  m[2]=name  m[3]=expr
+      const isDesc = m.length === 4 && m[3] !== undefined;
+      const varName = isDesc ? m[2] : m[1];
+      let exprStr = (isDesc ? m[3] : m[2]).trim();
+      const prefix  = isDesc ? m[1] : '';
+      let val, unit = '';
       try {
-        val = parseFloat(evalFormula(exprStr, vars));
+        val = parseFloat(evalFormula(exprStr, vars).replace(/,/g, ''));
         if (isNaN(val)) throw new Error('NaN');
-      } catch(err) { return; }
+      } catch(err) {
+        const ue = extractValueAndUnit(exprStr);
+        if (!ue) return;
+        val = ue.val; unit = ue.unit; exprStr = ue.numStr;
+      }
       e.preventDefault();
-      commitVarDef(node, m[1], val, exprStr);
+      commitVarDef(node, varName, val, exprStr, prefix, unit);
     }
   }
 }, true);
@@ -1394,6 +1479,36 @@ function commitFormula(ed) {
   if (eqIdx === -1) { cancelFormula(); return; }
   const formula = text.slice(eqIdx + 1).trim();
   if (!formula) { cancelFormula(); return; }
+  // If the text before = ends with an identifier, treat this as a variable definition
+  // e.g. "shear force V = 5"  or plain  "V = 5"
+  const before = text.slice(0, eqIdx);
+  const varEndMatch = before.trimEnd().match(/^([\s\S]*\s)?([a-zA-Z][a-zA-Z0-9_]*)$/);
+  if (varEndMatch) {
+    const varName = varEndMatch[2];
+    const prefix  = varEndMatch[1] || '';
+    let varVal, varUnit = '', varExpr = formula;
+    try { varVal = parseFloat(evalFormula(formula, vars).replace(/,/g, '')); } catch(e) { varVal = NaN; }
+    if (isNaN(varVal)) {
+      const ue = extractValueAndUnit(formula);
+      if (ue) { varVal = ue.val; varUnit = ue.unit; varExpr = ue.numStr; }
+    }
+    if (!isNaN(varVal)) {
+      const parent = node.parentNode;
+      const frag = document.createDocumentFragment();
+      if (prefix) frag.appendChild(document.createTextNode(prefix));
+      frag.appendChild(makeVarDefChip(varName, varVal, varExpr, varUnit));
+      const spacer = document.createTextNode(' ');
+      frag.appendChild(spacer);
+      parent.replaceChild(frag, node);
+      const r = document.createRange();
+      r.setStartAfter(spacer); r.collapse(true);
+      sel.removeAllRanges(); sel.addRange(r);
+      formulaBuffer = null;
+      rebuildVars();
+      return;
+    }
+  }
+
   let result, isError = false;
   try { result = evalFormula(formula, vars); }
   catch(ex) { result = ex.message || 'Error'; isError = true; }
@@ -1431,10 +1546,11 @@ document.addEventListener('dblclick', e => {
   }
 });
 
-function commitVarDef(textNode, name, val, expr) {
+function commitVarDef(textNode, name, val, expr, prefix, unit) {
   const parent = textNode.parentNode;
   const frag = document.createDocumentFragment();
-  frag.appendChild(makeVarDefChip(name, val, expr));
+  if (prefix) frag.appendChild(document.createTextNode(prefix));
+  frag.appendChild(makeVarDefChip(name, val, expr, unit));
   const spacer = document.createTextNode('\u00A0');
   frag.appendChild(spacer);
   parent.replaceChild(frag, textNode);
