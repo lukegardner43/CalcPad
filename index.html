@@ -400,6 +400,8 @@ body{
   <div class="hints">
     <div class="hpill"><code>x = 42</code> + Enter → variable</div>
     <div class="hpill"><code>=x^2+3</code> + Enter → formula</div>
+    <div class="hpill"><code>x = 42 mm</code> → input unit</div>
+    <div class="hpill"><code>= expr [mm]</code> → output unit</div>
   </div>
 </div>
 
@@ -942,11 +944,20 @@ function renderVarChipContent(chip) {
 
   if (expr) {
     // Render:  name = <LaTeX expression> [ = substituted ] = value [unit]
+    const displayUnit = chip.dataset.varDisplayUnit || '';
+    let exprUnitSuffix, displayValStr;
+    if (displayUnit) {
+      const dFactor = getUnitConversionFactor(parseUnitStr(displayUnit));
+      displayValStr = fmtNumDisplay(dFactor !== null ? val / dFactor : val);
+      exprUnitSuffix = unitToLatex(displayUnit);
+    } else {
+      const exprUnit = evalUnitExpr(expr, varUnits);
+      exprUnitSuffix = exprUnit && Object.keys(exprUnit).length ? unitObjToLatex(exprUnit) : (unit ? unitToLatex(unit) : '');
+      displayValStr = fmtNumDisplay(val);
+    }
     try {
       const latexExpr = toLatex(expr);
-      const exprUnit = evalUnitExpr(expr, varUnits);
-      const exprUnitSuffix = exprUnit && Object.keys(exprUnit).length ? unitObjToLatex(exprUnit) : (unit ? unitToLatex(unit) : '');
-      const latexVal  = numToLatex(fmtNumDisplay(val)) + exprUnitSuffix;
+      const latexVal  = numToLatex(displayValStr) + exprUnitSuffix;
       const nameLatex = nameToLatex(name);
       const sub = toLatexSubstituted(expr, vars, varUnits);
       inner = katex.renderToString(
@@ -954,10 +965,10 @@ function renderVarChipContent(chip) {
         { displayMode: false, throwOnError: false, output: 'html' }
       );
     } catch(e) {
-      inner = `<span class="vdc-name">${name} = ${expr} = </span><span class="vdc-val">${fmtNumDisplay(val)}${unit ? ' ' + unit : ''}</span>`;
+      inner = `<span class="vdc-name">${name} = ${expr} = </span><span class="vdc-val">${displayValStr}${displayUnit ? ' ' + displayUnit : (unit ? ' ' + unit : '')}</span>`;
     }
     chip.innerHTML = inner;
-    chip.title = `${name} = ${expr} = ${fmtNumDisplay(val)}${unit ? ' ' + unit : ''}`;
+    chip.title = `${name} = ${expr} = ${displayValStr}${displayUnit ? ' ' + displayUnit : (unit ? ' ' + unit : '')}`;
   } else if (unit) {
     // Render:  name = origValue unit  (show the value the user typed, not the SI-converted internal value)
     const displayVal = chip.dataset.varOrigNum || fmtNum(val);
@@ -994,7 +1005,7 @@ function renderVarChipContent(chip) {
   }
 }
 
-function makeVarDefChip(name, val, expr, unit, siUnit) {
+function makeVarDefChip(name, val, expr, unit, siUnit, displayUnit) {
   const chip = document.createElement('span');
   chip.contentEditable = 'false';
   chip.className = 'var-def-chip';
@@ -1006,6 +1017,7 @@ function makeVarDefChip(name, val, expr, unit, siUnit) {
   if (isFormulaExpr) chip.dataset.varExpr = expr.trim();
   if (unit) chip.dataset.varUnit = unit;
   if (siUnit && siUnit !== unit) chip.dataset.varSiUnit = siUnit;
+  if (displayUnit) chip.dataset.varDisplayUnit = displayUnit;
   // For unit variables store the original typed number separately for display/editing
   if (unit && !isFormulaExpr && expr && expr.trim() !== String(val)) {
     chip.dataset.varOrigNum = expr.trim();
@@ -1081,7 +1093,9 @@ function startEditVarDefChip(chip) {
   // Remove the trailing non-breaking space spacer so cursor lands in the text node
   const next = chip.nextSibling;
   if (next && next.nodeType === Node.TEXT_NODE && next.textContent === ' ') next.remove();
-  const editText = name + ' = ' + expr + (unit ? ' ' + unit : '');
+  const displayUnit = chip.dataset.varDisplayUnit || '';
+  const editText = name + ' = ' + expr +
+    (displayUnit ? ' [' + displayUnit + ']' : (unit ? ' ' + unit : ''));
   const textNode = document.createTextNode(editText);
   chip.parentNode.replaceChild(textNode, chip);
   const range = document.createRange();
@@ -1592,6 +1606,10 @@ document.addEventListener('keydown', e => {
       const varName = isDesc ? m[2] : m[1];
       let exprStr = (isDesc ? m[3] : m[2]).trim();
       const prefix  = isDesc ? m[1] : '';
+      // Extract optional output display unit: "h + b [mm]" → exprStr="h + b", dispUnit="mm"
+      let dispUnit = '';
+      const dispUnitMatch = exprStr.match(/^(.*?)\s*\[([^\]]+)\]\s*$/);
+      if (dispUnitMatch && dispUnitMatch[1].trim()) { exprStr = dispUnitMatch[1].trim(); dispUnit = dispUnitMatch[2].trim(); }
       let val, unit = '', siUnit = '';
       try {
         val = parseFloat(evalFormula(exprStr, vars).replace(/,/g, ''));
@@ -1606,7 +1624,7 @@ document.addEventListener('keydown', e => {
         else { val = ue.val; siUnit = unit; }
       }
       e.preventDefault();
-      commitVarDef(node, varName, val, exprStr, prefix, unit, siUnit);
+      commitVarDef(node, varName, val, exprStr, prefix, unit, siUnit, dispUnit);
     }
   }
 }, true);
@@ -1657,9 +1675,10 @@ function commitFormula(ed) {
   if (unitSpecMatch) { formula = unitSpecMatch[1].trim(); outputUnit = unitSpecMatch[2].trim(); }
   // If the text before = ends with an identifier, treat this as a variable definition
   // e.g. "shear force V = 5"  or plain  "V = 5"
-  // Skip var-def path when an output unit is specified — that always makes a formula chip.
+  // If text before = ends with an identifier, treat as variable definition.
+  // outputUnit (from [mm] spec) becomes the display unit on the chip.
   const before = text.slice(0, eqIdx);
-  const varEndMatch = !outputUnit && before.trimEnd().match(/^([\s\S]*\s)?([a-zA-Z][a-zA-Z0-9_]*)$/);
+  const varEndMatch = before.trimEnd().match(/^([\s\S]*\s)?([a-zA-Z][a-zA-Z0-9_]*)$/);
   if (varEndMatch) {
     const varName = varEndMatch[2];
     const prefix  = varEndMatch[1] || '';
@@ -1678,7 +1697,7 @@ function commitFormula(ed) {
       const parent = node.parentNode;
       const frag = document.createDocumentFragment();
       if (prefix) frag.appendChild(document.createTextNode(prefix));
-      frag.appendChild(makeVarDefChip(varName, varVal, varExpr, varUnit, varSiUnit));
+      frag.appendChild(makeVarDefChip(varName, varVal, varExpr, varUnit, varSiUnit, outputUnit));
       const spacer = document.createTextNode(' ');
       frag.appendChild(spacer);
       parent.replaceChild(frag, node);
@@ -1727,11 +1746,11 @@ document.addEventListener('dblclick', e => {
   }
 });
 
-function commitVarDef(textNode, name, val, expr, prefix, unit, siUnit) {
+function commitVarDef(textNode, name, val, expr, prefix, unit, siUnit, displayUnit) {
   const parent = textNode.parentNode;
   const frag = document.createDocumentFragment();
   if (prefix) frag.appendChild(document.createTextNode(prefix));
-  frag.appendChild(makeVarDefChip(name, val, expr, unit, siUnit));
+  frag.appendChild(makeVarDefChip(name, val, expr, unit, siUnit, displayUnit));
   const spacer = document.createTextNode('\u00A0');
   frag.appendChild(spacer);
   parent.replaceChild(frag, textNode);
