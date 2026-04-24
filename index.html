@@ -1574,7 +1574,6 @@ function commitFormula(ed) {
   let result, isError = false;
   try { result = evalFormula(formula, vars); }
   catch(ex) { result = ex.message || 'Error'; isError = true; }
-  let before = text.slice(0, eqIdx);
   const parent = node.parentNode;
   const frag = document.createDocumentFragment();
   if (before) frag.appendChild(document.createTextNode(before));
