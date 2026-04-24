@@ -748,6 +748,23 @@ function toLatex(rawFormula) {
   catch(e) { return formula; }
 }
 
+// Return a LaTeX string with variable names replaced by their numeric values,
+// or null if the formula contained no variables (nothing to substitute).
+function toLatexSubstituted(formula, variables) {
+  const vnames = Object.keys(variables).sort((a, b) => b.length - a.length);
+  if (!vnames.length) return null;
+  let sub = formula;
+  let changed = false;
+  for (const vn of vnames) {
+    // Use raw number string (no locale commas) so toLatex can parse it
+    const valStr = fmtNum(variables[vn]).replace(/,/g, '');
+    const next = sub.replace(new RegExp(`\\b${vn}\\b`, 'g'), valStr);
+    if (next !== sub) { changed = true; sub = next; }
+  }
+  if (!changed) return null;
+  try { return toLatex(sub); } catch(e) { return null; }
+}
+
 function numToLatex(s) {
   const n = parseFloat(s.replace(/,/g, ''));
   if (isNaN(n)) return s;
@@ -771,8 +788,9 @@ function renderVarChipContent(chip) {
       const latexExpr = toLatex(expr);
       const latexVal  = numToLatex(fmtNum(val));
       const nameLatex = nameToLatex(name);
+      const sub = toLatexSubstituted(expr, vars);
       inner = katex.renderToString(
-        nameLatex + ' = ' + latexExpr + ' = ' + latexVal,
+        nameLatex + ' = ' + latexExpr + (sub ? ' = ' + sub : '') + ' = ' + latexVal,
         { displayMode: false, throwOnError: false, output: 'html' }
       );
     } catch(e) {
@@ -895,7 +913,9 @@ function setFormulaContent(chip, formula, result, isError) {
   try {
     const lhs = toLatex(formula);
     const rhs = numToLatex(result);
-    chip.innerHTML = katex.renderToString(lhs + ' = ' + rhs, {
+    const sub = toLatexSubstituted(formula, vars);
+    const latex = lhs + (sub ? ' = ' + sub : '') + ' = ' + rhs;
+    chip.innerHTML = katex.renderToString(latex, {
       displayMode: false, throwOnError: false, output: 'html'
     });
   } catch(e) {
