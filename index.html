@@ -193,15 +193,17 @@ body{
   font-size:9px;color:var(--mid);border-top:1px solid #ddd;margin-top:4px}
 
 /* ── Chips ── */
-.var-def-chip{display:inline-flex;flex-wrap:wrap;align-items:baseline;font-family:Arial,sans-serif;
-  font-size:11px;font-style:italic;color:var(--dark);user-select:none;cursor:default}
+.var-def-chip{display:inline-flex;align-items:baseline;font-family:Arial,sans-serif;
+  font-size:11px;font-style:italic;color:var(--dark);user-select:none;cursor:default;max-width:100%}
 .vdc-val{cursor:pointer;border-bottom:1px dotted var(--mid)}
 .vdc-val:hover{color:var(--rubine);border-bottom-color:var(--rubine)}
 .vdc-edit-input{border:none;border-bottom:1px solid var(--rubine);outline:none;background:transparent;
   font-family:Arial,sans-serif;font-size:11px;font-style:italic;color:var(--dark);width:60px;padding:0 2px}
-.formula-chip{display:inline-flex;flex-wrap:wrap;align-items:baseline;max-width:100%;cursor:default;user-select:none;vertical-align:middle}
+.formula-chip{display:inline-flex;align-items:baseline;max-width:100%;cursor:default;user-select:none;vertical-align:middle}
 .formula-chip .katex{font-size:1em}
 .formula-chip.error{color:var(--rubine);font-style:italic}
+.flhs{flex-shrink:0}
+.fseg-right{display:flex;flex-wrap:wrap;align-items:baseline;min-width:0}
 .fseg{display:inline-flex;align-items:baseline}
 .feq{padding-right:0.15em}
 
@@ -1013,9 +1015,11 @@ function renderVarChipContent(chip) {
       const sub = toLatexSubstituted(expr, vars, varUnits);
       const kx = s => katex.renderToString(s, {displayMode: false, throwOnError: false, output: 'html'});
       inner =
-        `<span class="fseg">${kx(nameLatex + ' = ' + latexExpr)}</span>` +
+        `<span class="fseg flhs">${kx(nameLatex + ' = ' + latexExpr)}</span>` +
+        `<span class="fseg-right">` +
         (sub ? `<span class="fseg"><span class="feq"> = </span>${kx(sub)}</span>` : '') +
-        `<span class="fseg"><span class="feq"> = </span>${kx(latexVal)}</span>`;
+        `<span class="fseg"><span class="feq"> = </span>${kx(latexVal)}</span>` +
+        `</span>`;
     } catch(e) {
       inner = `<span class="vdc-name">${name} = ${expr} = </span><span class="vdc-val">${displayValStr}${displayUnit ? ' ' + displayUnit : (unit ? ' ' + unit : '')}</span>`;
     }
@@ -1194,9 +1198,11 @@ function setFormulaContent(chip, formula, result, isError) {
     const rhs = numToLatex(displayVal) + unitSuffix;
     const kx = s => katex.renderToString(s, {displayMode: false, throwOnError: false, output: 'html'});
     chip.innerHTML =
-      `<span class="fseg">${kx(lhs)}</span>` +
+      `<span class="fseg flhs">${kx(lhs)}</span>` +
+      `<span class="fseg-right">` +
       (sub ? `<span class="fseg"><span class="feq"> = </span>${kx(sub)}</span>` : '') +
-      `<span class="fseg"><span class="feq"> = </span>${kx(rhs)}</span>`;
+      `<span class="fseg"><span class="feq"> = </span>${kx(rhs)}</span>` +
+      `</span>`;
   } catch(e) {
     chip.innerHTML = `<span style="font-style:italic">=${formula} = ${result}${outputUnit ? ' ' + outputUnit : ''}</span>`;
   }
