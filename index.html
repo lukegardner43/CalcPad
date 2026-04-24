@@ -589,6 +589,14 @@ function evalFormula(raw, variables) {
 function fmtNum(n) {
   const r = Math.round(n * 1e10) / 1e10;
   if (Number.isInteger(r)) return r.toLocaleString('en-GB');
+  return parseFloat(r.toFixed(8)).toString();
+}
+
+// For display only: 2dp for numbers ≥ 0.01, 3 sig-figs for smaller
+function fmtNumDisplay(n) {
+  const r = Math.round(n * 1e10) / 1e10;
+  if (Number.isInteger(r)) return r.toLocaleString('en-GB');
+  if (Math.abs(r) < 0.01) return parseFloat(r.toPrecision(3)).toString();
   return parseFloat(r.toFixed(2)).toString();
 }
 
@@ -904,7 +912,7 @@ function toLatexSubstituted(formula, variables, varUnitsMap) {
   let hasVars = false;
   for (const vn of vnames) {
     if (new RegExp(`\\b${vn}\\b`).test(formula)) {
-      const valStr = fmtNum(variables[vn]).replace(/,/g, '');
+      const valStr = fmtNumDisplay(variables[vn]).replace(/,/g, '');
       const unit = varUnitsMap && varUnitsMap[vn];
       subsMap[vn] = { val: valStr, unit: unit || null };
       hasVars = true;
@@ -938,7 +946,7 @@ function renderVarChipContent(chip) {
       const latexExpr = toLatex(expr);
       const exprUnit = evalUnitExpr(expr, varUnits);
       const exprUnitSuffix = exprUnit && Object.keys(exprUnit).length ? unitObjToLatex(exprUnit) : (unit ? unitToLatex(unit) : '');
-      const latexVal  = numToLatex(fmtNum(val)) + exprUnitSuffix;
+      const latexVal  = numToLatex(fmtNumDisplay(val)) + exprUnitSuffix;
       const nameLatex = nameToLatex(name);
       const sub = toLatexSubstituted(expr, vars, varUnits);
       inner = katex.renderToString(
@@ -946,10 +954,10 @@ function renderVarChipContent(chip) {
         { displayMode: false, throwOnError: false, output: 'html' }
       );
     } catch(e) {
-      inner = `<span class="vdc-name">${name} = ${expr} = </span><span class="vdc-val">${fmtNum(val)}${unit ? ' ' + unit : ''}</span>`;
+      inner = `<span class="vdc-name">${name} = ${expr} = </span><span class="vdc-val">${fmtNumDisplay(val)}${unit ? ' ' + unit : ''}</span>`;
     }
     chip.innerHTML = inner;
-    chip.title = `${name} = ${expr} = ${fmtNum(val)}${unit ? ' ' + unit : ''}`;
+    chip.title = `${name} = ${expr} = ${fmtNumDisplay(val)}${unit ? ' ' + unit : ''}`;
   } else if (unit) {
     // Render:  name = origValue unit  (show the value the user typed, not the SI-converted internal value)
     const displayVal = chip.dataset.varOrigNum || fmtNum(val);
@@ -1094,17 +1102,17 @@ function setFormulaContent(chip, formula, result, isError) {
   try {
     const lhs = toLatex(formula);
     const sub = toLatexSubstituted(formula, vars, varUnits);
-    let displayVal = result;
-    let unitSuffix = '';
+    // Use full-precision float from result string so 2dp rounding doesn't corrupt unit conversion
+    const rawSI = parseFloat(result.replace(/,/g, ''));
+    let displayVal, unitSuffix = '';
     if (outputUnit) {
       // Convert SI result to the user-specified output unit
       const unitObj = parseUnitStr(outputUnit);
       const factor = getUnitConversionFactor(unitObj);
-      if (factor !== null) {
-        displayVal = fmtNum(parseFloat(result.replace(/,/g, '')) / factor);
-      }
+      displayVal = fmtNumDisplay(factor !== null ? rawSI / factor : rawSI);
       unitSuffix = unitToLatex(outputUnit);
     } else {
+      displayVal = fmtNumDisplay(rawSI);
       const resUnit = evalUnitExpr(formula, varUnits);
       unitSuffix = resUnit && Object.keys(resUnit).length ? unitObjToLatex(resUnit) : '';
     }
