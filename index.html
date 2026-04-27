@@ -258,7 +258,7 @@ body{
 /* Sidebar */
 .sidebar{width:170px;flex-shrink:0;background:#fff;border:1px solid #ddd;
   border-top:3px solid var(--purple);box-shadow:0 2px 10px rgba(0,0,0,.08);
-  position:sticky;top:50px;align-self:flex-start}
+  position:sticky;top:76px;align-self:flex-start;max-height:calc(100vh - 86px);overflow-y:auto}
 .sh{background:#eceaf8;border-bottom:1px solid #b0a6dc;padding:7px 10px;display:flex;align-items:center;gap:6px}
 .st{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--purple);flex:1}
 .sc{font-size:10px;font-weight:700;color:var(--purple);background:#fff;padding:1px 6px;border-radius:8px;border:1px solid #b0a6dc}
@@ -578,12 +578,28 @@ function renderSidebar() {
   empty.style.display = names.length === 0 ? '' : 'none';
   list.querySelectorAll('.vs-row').forEach(r => r.remove());
   names.forEach(name => {
+    const chip = document.querySelector(`.var-def-chip[data-var-name="${CSS.escape(name)}"]`);
+    let dispVal = fmtNum(vars[name]);
+    let unit = '';
+    if (chip) {
+      const du = chip.dataset.varDisplayUnit || chip.dataset.varUnit || '';
+      if (du) {
+        unit = du;
+        const origNum = chip.dataset.varOrigNum;
+        if (origNum) {
+          dispVal = origNum;
+        } else {
+          const f = getUnitConversionFactor(parseUnitStr(du));
+          dispVal = fmtNum(f !== null ? vars[name] / f : vars[name]);
+        }
+      }
+    }
     const row = document.createElement('div');
     row.className = 'vs-row';
     row.innerHTML =
       `<span class="vs-name">${name}</span>` +
       `<span class="vs-eq">=</span>` +
-      `<span class="vs-val">${fmtNum(vars[name])}</span>`;
+      `<span class="vs-val">${dispVal}${unit ? ' ' + unit : ''}</span>`;
     list.appendChild(row);
   });
 }
@@ -1663,61 +1679,59 @@ function getAllEditors() {
   return Array.from(document.querySelectorAll('.calc-area'));
 }
 
-// Override rebuildVars to scan all editors
+// Override rebuildVars to scan all editors in document order (vars then formulas interleaved)
 function rebuildVars() {
   vars = {};
   varUnits = {};
   getAllEditors().forEach(ed => {
-    ed.querySelectorAll('.var-def-chip').forEach(chip => {
-      let name = chip.dataset.varName;
-      const expr = chip.dataset.varExpr;
-      const unit = chip.dataset.varUnit || '';
-      const siUnit = chip.dataset.varSiUnit || unit;
-      if (!name) return;
-      if (expr) {
-        try {
-          const v = parseFloat(evalFormula(expr, vars).replace(/,/g, ''));
-          if (!isNaN(v)) {
-            chip.dataset.varVal = String(v);
-            renderVarChipContent(chip);
-            vars[name] = v;
-            if (unit) { varUnits[name] = siUnit; }
-            else { const inf = evalUnitExpr(expr, varUnits); if (inf && Object.keys(inf).length) varUnits[name] = unitObjToStr(inf); }
+    Array.from(ed.querySelectorAll('.var-def-chip, .formula-chip')).forEach(chip => {
+      if (chip.classList.contains('var-def-chip')) {
+        const name = chip.dataset.varName;
+        const expr = chip.dataset.varExpr;
+        const unit = chip.dataset.varUnit || '';
+        const siUnit = chip.dataset.varSiUnit || unit;
+        if (!name) return;
+        if (expr) {
+          try {
+            const v = parseFloat(evalFormula(expr, vars).replace(/,/g, ''));
+            if (!isNaN(v)) {
+              chip.dataset.varVal = String(v);
+              vars[name] = v;
+              if (unit) { varUnits[name] = siUnit; }
+              else { const inf = evalUnitExpr(expr, varUnits); if (inf && Object.keys(inf).length) varUnits[name] = unitObjToStr(inf); }
+              renderVarChipContent(chip);
+            }
+          } catch(e) {
+            const fallback = parseFloat(chip.dataset.varVal);
+            if (!isNaN(fallback)) { vars[name] = fallback; if (unit) varUnits[name] = siUnit; }
           }
-        } catch(e) {
-          const fallback = parseFloat(chip.dataset.varVal);
-          if (!isNaN(fallback)) {
-            vars[name] = fallback;
+        } else {
+          const val = parseFloat(chip.dataset.varVal);
+          if (!isNaN(val)) {
+            vars[name] = val;
             if (unit) varUnits[name] = siUnit;
           }
         }
       } else {
-        const val = parseFloat(chip.dataset.varVal);
-        if (!isNaN(val)) {
-          vars[name] = val;
-          if (unit) varUnits[name] = siUnit;
-        }
+        const formula = chip.dataset.formula;
+        if (!formula) return;
+        const snapVarUnits = { ...varUnits };
+        let result, isError = false;
+        try { result = evalFormula(formula, vars); }
+        catch(e) { result = e.message || 'Error'; isError = true; }
+        chip.className = 'formula-chip' + (isError ? ' error' : '');
+        const savedVarUnits = varUnits;
+        varUnits = snapVarUnits;
+        setFormulaContent(chip, formula, result, isError);
+        varUnits = savedVarUnits;
       }
     });
   });
-  recalcAll();
   renderSidebar();
   autoSave();
 }
 
-function recalcAll() {
-  getAllEditors().forEach(ed => {
-    ed.querySelectorAll('.formula-chip').forEach(chip => {
-      const formula = chip.dataset.formula;
-      if (!formula) return;
-      let result, isError = false;
-      try { result = evalFormula(formula, vars); }
-      catch(e) { result = e.message || 'Error'; isError = true; }
-      chip.className = 'formula-chip' + (isError ? ' error' : '');
-      setFormulaContent(chip, formula, result, isError);
-    });
-  });
-}
+function recalcAll() { rebuildVars(); }
 
 // ── Input handling (variable/formula detection) ───────────────
 formulaBuffer = null;
@@ -1768,17 +1782,26 @@ document.addEventListener('keydown', e => {
         if (conv) { val = conv.siVal; siUnit = conv.siUnitStr; }
         else { val = ue.val; siUnit = unit; }
       }
+      const existing = document.querySelector(`.var-def-chip[data-var-name="${CSS.escape(varName)}"]`);
+      if (existing) {
+        node.style.color = 'var(--rubine)';
+        setTimeout(() => { node.style.color = ''; }, 1200);
+        return;
+      }
       e.preventDefault();
       commitVarDef(node, varName, val, exprStr, prefix, unit, siUnit, dispUnit);
     }
   }
 }, true);
 
+let _rebuildTimer = null;
 document.addEventListener('input', e => {
   const ca = e.target.closest('.calc-area');
   if (!ca) return;
   setActiveEditor(ca);
   isDirty = true; autoSave();
+  clearTimeout(_rebuildTimer);
+  _rebuildTimer = setTimeout(rebuildVars, 300);
   if (formulaBuffer !== null) {
     const sel = window.getSelection();
     if (!sel.rangeCount) return;
