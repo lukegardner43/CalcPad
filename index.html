@@ -326,12 +326,18 @@ body{
 <div class="bug-overlay" id="bugOverlay">
   <div class="bug-modal">
     <h3>Report a Bug</h3>
-    <textarea id="bugText" placeholder="Describe what you were doing and what went wrong…"></textarea>
-    <p id="bugStatus" style="margin:8px 0 4px;font-size:11px;color:var(--mid)"></p>
-    <div class="bug-modal-actions">
-      <button class="bug-cancel" onclick="closeBugReport()">Cancel</button>
-      <button class="bug-submit" id="bugSubmitBtn" onclick="submitBugReport()">Send report</button>
-    </div>
+    <form id="bugForm" action="https://api.web3forms.com/submit" method="POST">
+      <input type="hidden" name="access_key" value="1e0a8a81-0eea-452c-8db5-d573d25ec68b">
+      <input type="hidden" name="subject" value="CalcPad Bug Report">
+      <input type="hidden" name="redirect" id="bugRedirect" value="">
+      <input type="text" name="name" placeholder="Your name (optional)" style="width:100%;border:1px solid #ddd;border-radius:4px;padding:6px 8px;font-size:12px;font-family:Arial,sans-serif;box-sizing:border-box;margin-bottom:6px">
+      <input type="email" name="email" placeholder="Your email (optional)" style="width:100%;border:1px solid #ddd;border-radius:4px;padding:6px 8px;font-size:12px;font-family:Arial,sans-serif;box-sizing:border-box;margin-bottom:6px">
+      <textarea name="message" required placeholder="Describe what you were doing and what went wrong…" style="width:100%;height:100px;border:1px solid #ddd;border-radius:4px;padding:8px;font-size:12px;font-family:Arial,sans-serif;resize:vertical;box-sizing:border-box"></textarea>
+      <div class="bug-modal-actions">
+        <button type="button" class="bug-cancel" onclick="closeBugReport()">Cancel</button>
+        <button type="submit" class="bug-submit">Send report</button>
+      </div>
+    </form>
   </div>
 </div>
 
@@ -2192,48 +2198,9 @@ function closeBugReport() {
 document.getElementById('bugOverlay').addEventListener('mousedown', e => {
   if (e.target === document.getElementById('bugOverlay')) closeBugReport();
 });
-const WEB3FORMS_KEY = '1e0a8a81-0eea-452c-8db5-d573d25ec68b';
-
-async function submitBugReport() {
-  const text = document.getElementById('bugText').value.trim();
-  if (!text) { closeBugReport(); return; }
-  const btn = document.getElementById('bugSubmitBtn');
-  const status = document.getElementById('bugStatus');
-  btn.disabled = true;
-  btn.textContent = 'Sending…';
-  status.style.color = 'var(--mid)';
-  status.textContent = '';
-  try {
-    const res = await fetch('https://api.web3forms.com/submit', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify({
-        access_key: WEB3FORMS_KEY,
-        subject: 'CalcPad Bug Report',
-        message: text,
-        version: '27.04.26',
-        date: new Date().toLocaleString('en-GB'),
-        from_name: 'CalcPad User',
-      })
-    });
-    const data = await res.json();
-    console.log('Web3Forms response:', data);
-    if (data.success) {
-      status.style.color = 'green';
-      status.textContent = 'Report sent — thank you!';
-      btn.textContent = 'Sent ✓';
-      setTimeout(closeBugReport, 1500);
-    } else {
-      throw new Error(data.message || 'Failed');
-    }
-  } catch(e) {
-    console.error('Bug report error:', e);
-    status.style.color = 'var(--rubine)';
-    status.textContent = 'Error: ' + e.message + ' — please email lgardner@perega.co.uk directly.';
-    btn.disabled = false;
-    btn.textContent = 'Send report';
-  }
-}
+document.getElementById('bugForm').addEventListener('submit', () => {
+  document.getElementById('bugRedirect').value = window.location.href;
+});
 
 function triggerDownload(data, filename) {
   const mime = filename.endsWith('.txt') ? 'text/plain' : 'application/json';
