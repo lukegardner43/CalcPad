@@ -326,13 +326,11 @@ body{
 <div class="bug-overlay" id="bugOverlay">
   <div class="bug-modal">
     <h3>Report a Bug</h3>
-    <form id="bugForm" action="https://formsubmit.co/lgardner@perega.co.uk" method="POST">
-      <input type="hidden" name="_subject" value="CalcPad Bug Report">
-      <input type="hidden" name="_captcha" value="false">
-      <input type="hidden" name="_redirect" id="bugRedirect" value="">
+    <form id="bugForm">
       <input type="text" name="name" placeholder="Your name (optional)" style="width:100%;border:1px solid #ddd;border-radius:4px;padding:6px 8px;font-size:12px;font-family:Arial,sans-serif;box-sizing:border-box;margin-bottom:6px">
       <input type="email" name="email" placeholder="Your email (optional)" style="width:100%;border:1px solid #ddd;border-radius:4px;padding:6px 8px;font-size:12px;font-family:Arial,sans-serif;box-sizing:border-box;margin-bottom:6px">
       <textarea name="message" required placeholder="Describe what you were doing and what went wrong…" style="width:100%;height:100px;border:1px solid #ddd;border-radius:4px;padding:8px;font-size:12px;font-family:Arial,sans-serif;resize:vertical;box-sizing:border-box"></textarea>
+      <p id="bugStatus" style="margin:6px 0 0;font-size:11px;min-height:16px"></p>
       <div class="bug-modal-actions">
         <button type="button" class="bug-cancel" onclick="closeBugReport()">Cancel</button>
         <button type="submit" class="bug-submit">Send report</button>
@@ -2198,8 +2196,37 @@ function closeBugReport() {
 document.getElementById('bugOverlay').addEventListener('mousedown', e => {
   if (e.target === document.getElementById('bugOverlay')) closeBugReport();
 });
-document.getElementById('bugForm').addEventListener('submit', () => {
-  document.getElementById('bugRedirect').value = window.location.href + '?reported=1';
+const bugForm = document.getElementById('bugForm');
+bugForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = bugForm.querySelector('button[type="submit"]');
+  const status = document.getElementById('bugStatus');
+  const formData = new FormData(bugForm);
+  formData.append('access_key', '1e0a8a81-0eea-452c-8db5-d573d25ec68b');
+  formData.append('subject', 'CalcPad Bug Report');
+  const origText = btn.textContent;
+  btn.textContent = 'Sending…'; btn.disabled = true;
+  status.style.color = 'var(--mid)'; status.textContent = '';
+  try {
+    const response = await fetch('https://api.web3forms.com/submit', {
+      method: 'POST', body: formData
+    });
+    const data = await response.json();
+    if (response.ok) {
+      status.style.color = 'green';
+      status.textContent = 'Report sent — thank you!';
+      bugForm.reset();
+      setTimeout(closeBugReport, 1500);
+    } else {
+      status.style.color = 'var(--rubine)';
+      status.textContent = 'Error: ' + data.message;
+    }
+  } catch(err) {
+    status.style.color = 'var(--rubine)';
+    status.textContent = 'Could not send — please email lgardner@perega.co.uk directly.';
+  } finally {
+    btn.textContent = origText; btn.disabled = false;
+  }
 });
 
 function triggerDownload(data, filename) {
