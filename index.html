@@ -43,9 +43,6 @@ body{
 .bug-cancel{background:transparent;color:var(--mid);border:1px solid #ddd;border-radius:3px;
   padding:6px 12px;font-size:12px;cursor:pointer;font-family:Arial,sans-serif}
 .bug-cancel:hover{border-color:#aaa;color:var(--dark)}
-.bug-download{background:transparent;color:var(--purple);border:1px solid var(--purple);
-  border-radius:3px;padding:6px 12px;font-size:12px;cursor:pointer;font-family:Arial,sans-serif;margin-right:auto}
-.bug-download:hover{background:#f3e8ff}
 
 /* Toolbar */
 .toolbar{
@@ -330,10 +327,10 @@ body{
   <div class="bug-modal">
     <h3>Report a Bug</h3>
     <textarea id="bugText" placeholder="Describe what you were doing and what went wrong…"></textarea>
+    <p style="margin:8px 0 4px;font-size:11px;color:var(--mid)">Clicking Send will open your email client with this report addressed to the development team.</p>
     <div class="bug-modal-actions">
-      <button class="bug-download" onclick="downloadBugLog()">Download log</button>
       <button class="bug-cancel" onclick="closeBugReport()">Cancel</button>
-      <button class="bug-submit" onclick="submitBugReport()">Submit</button>
+      <button class="bug-submit" onclick="submitBugReport()">Send report</button>
     </div>
   </div>
 </div>
@@ -2184,7 +2181,6 @@ function buildSaveData() {
 }
 
 // ── Bug reporting ──────────────────────────────────────────────
-const BUG_KEY = 'calcpad_bugs';
 function openBugReport() {
   document.getElementById('bugText').value = '';
   document.getElementById('bugOverlay').classList.add('open');
@@ -2199,21 +2195,12 @@ document.getElementById('bugOverlay').addEventListener('mousedown', e => {
 function submitBugReport() {
   const text = document.getElementById('bugText').value.trim();
   if (!text) { closeBugReport(); return; }
-  try {
-    const bugs = JSON.parse(localStorage.getItem(BUG_KEY) || '[]');
-    bugs.push({ text, reportedAt: new Date().toISOString(), version: '27.04.26' });
-    localStorage.setItem(BUG_KEY, JSON.stringify(bugs, null, 2));
-  } catch(e) {}
+  const subject = encodeURIComponent('CalcPad Bug Report');
+  const body = encodeURIComponent(
+    text + '\n\n---\nVersion: 27.04.26\nDate: ' + new Date().toLocaleString('en-GB')
+  );
+  window.location.href = 'mailto:lgardner@perega.co.uk?subject=' + subject + '&body=' + body;
   closeBugReport();
-}
-function downloadBugLog() {
-  try {
-    const bugs = JSON.parse(localStorage.getItem(BUG_KEY) || '[]');
-    const txt = bugs.length
-      ? bugs.map((b,i)=>`--- Report ${i+1} (${b.reportedAt}) ---\n${b.text}`).join('\n\n')
-      : '(No bug reports yet)';
-    triggerDownload(txt, 'calcpad-bugs.txt');
-  } catch(e) {}
 }
 
 function triggerDownload(data, filename) {
