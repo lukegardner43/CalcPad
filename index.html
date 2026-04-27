@@ -329,7 +329,7 @@ body{
     <form id="bugForm">
       <input type="text" name="name" placeholder="Your name (optional)" style="width:100%;border:1px solid #ddd;border-radius:4px;padding:6px 8px;font-size:12px;font-family:Arial,sans-serif;box-sizing:border-box;margin-bottom:6px">
       <input type="email" name="email" placeholder="Your email (optional)" style="width:100%;border:1px solid #ddd;border-radius:4px;padding:6px 8px;font-size:12px;font-family:Arial,sans-serif;box-sizing:border-box;margin-bottom:6px">
-      <textarea name="message" required placeholder="Describe what you were doing and what went wrong…" style="width:100%;height:100px;border:1px solid #ddd;border-radius:4px;padding:8px;font-size:12px;font-family:Arial,sans-serif;resize:vertical;box-sizing:border-box"></textarea>
+      <textarea name="message" id="bugText" required placeholder="Describe what you were doing and what went wrong…" style="width:100%;height:100px;border:1px solid #ddd;border-radius:4px;padding:8px;font-size:12px;font-family:Arial,sans-serif;resize:vertical;box-sizing:border-box"></textarea>
       <p id="bugStatus" style="margin:6px 0 0;font-size:11px;min-height:16px"></p>
       <div class="bug-modal-actions">
         <button type="button" class="bug-cancel" onclick="closeBugReport()">Cancel</button>
