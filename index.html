@@ -2217,6 +2217,7 @@ async function submitBugReport() {
       })
     });
     const data = await res.json();
+    console.log('Web3Forms response:', data);
     if (data.success) {
       status.style.color = 'green';
       status.textContent = 'Report sent — thank you!';
@@ -2226,8 +2227,9 @@ async function submitBugReport() {
       throw new Error(data.message || 'Failed');
     }
   } catch(e) {
+    console.error('Bug report error:', e);
     status.style.color = 'var(--rubine)';
-    status.textContent = 'Could not send — please email lgardner@perega.co.uk directly.';
+    status.textContent = 'Error: ' + e.message + ' — please email lgardner@perega.co.uk directly.';
     btn.disabled = false;
     btn.textContent = 'Send report';
   }
