@@ -327,10 +327,10 @@ body{
   <div class="bug-modal">
     <h3>Report a Bug</h3>
     <textarea id="bugText" placeholder="Describe what you were doing and what went wrong…"></textarea>
-    <p style="margin:8px 0 4px;font-size:11px;color:var(--mid)">Clicking Send will open your email client with this report addressed to the development team.</p>
+    <p id="bugStatus" style="margin:8px 0 4px;font-size:11px;color:var(--mid)"></p>
     <div class="bug-modal-actions">
       <button class="bug-cancel" onclick="closeBugReport()">Cancel</button>
-      <button class="bug-submit" onclick="submitBugReport()">Send report</button>
+      <button class="bug-submit" id="bugSubmitBtn" onclick="submitBugReport()">Send report</button>
     </div>
   </div>
 </div>
@@ -2192,15 +2192,45 @@ function closeBugReport() {
 document.getElementById('bugOverlay').addEventListener('mousedown', e => {
   if (e.target === document.getElementById('bugOverlay')) closeBugReport();
 });
-function submitBugReport() {
+const WEB3FORMS_KEY = 'YOUR_ACCESS_KEY_HERE'; // replace with key from web3forms.com
+
+async function submitBugReport() {
   const text = document.getElementById('bugText').value.trim();
   if (!text) { closeBugReport(); return; }
-  const subject = encodeURIComponent('CalcPad Bug Report');
-  const body = encodeURIComponent(
-    text + '\n\n---\nVersion: 27.04.26\nDate: ' + new Date().toLocaleString('en-GB')
-  );
-  window.location.href = 'mailto:lgardner@perega.co.uk?subject=' + subject + '&body=' + body;
-  closeBugReport();
+  const btn = document.getElementById('bugSubmitBtn');
+  const status = document.getElementById('bugStatus');
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  status.style.color = 'var(--mid)';
+  status.textContent = '';
+  try {
+    const res = await fetch('https://api.web3forms.com/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({
+        access_key: WEB3FORMS_KEY,
+        subject: 'CalcPad Bug Report',
+        message: text,
+        version: '27.04.26',
+        date: new Date().toLocaleString('en-GB'),
+        from_name: 'CalcPad User',
+      })
+    });
+    const data = await res.json();
+    if (data.success) {
+      status.style.color = 'green';
+      status.textContent = 'Report sent — thank you!';
+      btn.textContent = 'Sent ✓';
+      setTimeout(closeBugReport, 1500);
+    } else {
+      throw new Error(data.message || 'Failed');
+    }
+  } catch(e) {
+    status.style.color = 'var(--rubine)';
+    status.textContent = 'Could not send — please email lgardner@perega.co.uk directly.';
+    btn.disabled = false;
+    btn.textContent = 'Send report';
+  }
 }
 
 function triggerDownload(data, filename) {
