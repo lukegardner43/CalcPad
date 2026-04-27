@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>T4 Calculations — Perega</title>
+<title>CalcPad</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
@@ -55,8 +55,7 @@ body{
 }
 .logo{font-weight:900;font-size:18px;letter-spacing:.04em;margin-right:6px;
   display:flex;align-items:baseline;user-select:none}
-.logo .p1,.logo .p2,.logo .p4{color:var(--rubine)}
-.logo .p3{color:var(--golden)}.logo .p5,.logo .p6{color:var(--purple)}
+.logo{color:var(--rubine)}
 .sep{width:1px;height:20px;background:#ddd;margin:0 4px}
 .tbtn{min-width:26px;height:26px;padding:0 5px;border:1px solid transparent;
   background:transparent;border-radius:2px;cursor:pointer;display:inline-flex;
@@ -155,8 +154,7 @@ body{
 .pg-title-row{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:7px}
 .pg-title{font-size:16px;font-weight:700;color:var(--dark)}
 .pg-logo{display:flex;align-items:baseline;font-weight:900;font-size:28px;letter-spacing:.06em;user-select:none}
-.pg-logo .p1,.pg-logo .p2,.pg-logo .p4{color:var(--rubine)}
-.pg-logo .p3{color:var(--golden)}.pg-logo .p5,.pg-logo .p6{color:var(--purple)}
+.pg-logo{color:var(--rubine)}
 
 /* ── Meta grid (page 1 only) ── */
 .meta{display:grid;grid-template-columns:82px 1fr 90px 150px;
@@ -342,7 +340,7 @@ body{
 
 <!-- Toolbar -->
 <div class="toolbar">
-  <div class="logo"><span class="p1">P</span><span class="p2">E</span><span class="p3">R</span><span class="p4">E</span><span class="p5">G</span><span class="p6">A</span></div>
+  <div class="logo">CalcPad</div>
   <div class="sep"></div>
   <!-- File menu -->
   <div class="file-menu-wrap" id="fileMenuWrap">
@@ -478,7 +476,7 @@ body{
       <div class="pg-header">
         <div class="pg-title-row">
           <div class="pg-title">Calculations</div>
-          <div class="pg-logo"><span class="p1">P</span><span class="p2">E</span><span class="p3">R</span><span class="p4">E</span><span class="p5">G</span><span class="p6">A</span></div>
+          <div class="pg-logo">CalcPad</div>
         </div>
         <div class="meta" id="metaTable">
           <div class="mc span2">Project:</div>
@@ -1325,7 +1323,7 @@ function buildMirrorHeader(pageIdx) {
   titleDiv.textContent = 'Calculations';
   const logoDiv = document.createElement('div');
   logoDiv.className = 'pg-logo';
-  logoDiv.innerHTML = '<span class="p1">P</span><span class="p2">E</span><span class="p3">R</span><span class="p4">E</span><span class="p5">G</span><span class="p6">A</span>';
+  logoDiv.textContent = 'CalcPad';
   titleRow.appendChild(titleDiv);
   titleRow.appendChild(logoDiv);
   hdr.appendChild(titleRow);
@@ -2236,7 +2234,7 @@ function fileNew() {
   }
   pageCount = 1;
   restoreMeta({}); document.getElementById('m-date').value = new Date().toLocaleDateString('en-GB');
-  currentFileName = 'Untitled'; isDirty = false; document.title = 'Untitled — Perega';
+  currentFileName = 'Untitled'; isDirty = false; document.title = 'Untitled — CalcPad';
   try { localStorage.removeItem(LS_KEY); } catch(e) {}
   rebuildVars();
 }
@@ -2246,7 +2244,7 @@ function fileSaveAs() {
   let name = prompt('Save as:', currentFileName); if (name === null) return;
   currentFileName = name.replace(/\.perega$/, '') || 'Untitled';
   triggerDownload(buildSaveData(), currentFileName + '.perega'); isDirty = false;
-  document.title = currentFileName + ' — Perega';
+  document.title = currentFileName + ' — CalcPad';
 }
 function fileOpen() { closeFileMenu(); if (isDirty && !confirm('Unsaved changes will be lost. Continue?')) return; document.getElementById('openFileInput').click(); }
 function loadFile(input) {
@@ -2269,7 +2267,7 @@ function loadFile(input) {
       restoreMeta(data.meta || {});
       updateMirrorHeaders();
       currentFileName = file.name.replace(/\.perega$/, '');
-      isDirty = false; document.title = currentFileName + ' — Perega';
+      isDirty = false; document.title = currentFileName + ' — CalcPad';
       rebuildVars();
     } catch(err) { alert('Could not open file: ' + err.message); }
   };
