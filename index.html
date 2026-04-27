@@ -20,6 +20,33 @@ body{
   color:var(--dark);display:flex;flex-direction:column;align-items:center;padding:0 0 80px;
 }
 
+/* ── Alpha banner ── */
+.alpha-banner{width:100%;background:#7c3aed;color:#fff;text-align:center;
+  font-family:Arial,sans-serif;font-size:11px;font-weight:700;padding:4px 12px;
+  letter-spacing:.04em;display:flex;align-items:center;justify-content:center;gap:10px}
+.alpha-banner a{color:#e9d5ff;text-decoration:underline;cursor:pointer;font-weight:400}
+
+/* ── Bug report modal ── */
+.bug-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;
+  align-items:center;justify-content:center}
+.bug-overlay.open{display:flex}
+.bug-modal{background:#fff;border-radius:6px;padding:20px 24px;width:420px;max-width:95vw;
+  box-shadow:0 8px 32px rgba(0,0,0,.25);font-family:Arial,sans-serif}
+.bug-modal h3{margin:0 0 12px;font-size:13px;color:var(--dark)}
+.bug-modal textarea{width:100%;height:110px;border:1px solid #ddd;border-radius:4px;
+  padding:8px;font-size:12px;font-family:Arial,sans-serif;resize:vertical;box-sizing:border-box}
+.bug-modal textarea:focus{outline:none;border-color:var(--rubine)}
+.bug-modal-actions{display:flex;gap:8px;margin-top:10px;justify-content:flex-end}
+.bug-submit{background:var(--rubine);color:#fff;border:none;border-radius:3px;
+  padding:6px 16px;font-size:12px;cursor:pointer;font-family:Arial,sans-serif}
+.bug-submit:hover{background:#b5005b}
+.bug-cancel{background:transparent;color:var(--mid);border:1px solid #ddd;border-radius:3px;
+  padding:6px 12px;font-size:12px;cursor:pointer;font-family:Arial,sans-serif}
+.bug-cancel:hover{border-color:#aaa;color:var(--dark)}
+.bug-download{background:transparent;color:var(--purple);border:1px solid var(--purple);
+  border-radius:3px;padding:6px 12px;font-size:12px;cursor:pointer;font-family:Arial,sans-serif;margin-right:auto}
+.bug-download:hover{background:#f3e8ff}
+
 /* Toolbar */
 .toolbar{
   width:100%;background:#fff;border-bottom:2px solid var(--rubine);
@@ -294,6 +321,25 @@ body{
 </head>
 <body>
 
+<!-- Alpha banner -->
+<div class="alpha-banner" id="alphaBanner">
+  ⚠ Alpha Testing — this tool is under active development. Bugs may occur.
+  <a onclick="openBugReport()">Report a bug</a>
+</div>
+
+<!-- Bug report modal -->
+<div class="bug-overlay" id="bugOverlay">
+  <div class="bug-modal">
+    <h3>Report a Bug</h3>
+    <textarea id="bugText" placeholder="Describe what you were doing and what went wrong…"></textarea>
+    <div class="bug-modal-actions">
+      <button class="bug-download" onclick="downloadBugLog()">Download log</button>
+      <button class="bug-cancel" onclick="closeBugReport()">Cancel</button>
+      <button class="bug-submit" onclick="submitBugReport()">Submit</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toolbar -->
 <div class="toolbar">
   <div class="logo"><span class="p1">P</span><span class="p2">E</span><span class="p3">R</span><span class="p4">E</span><span class="p5">G</span><span class="p6">A</span></div>
@@ -463,7 +509,7 @@ body{
         <div id="editor" class="calc-area" contenteditable="true" spellcheck="true"
           data-placeholder="Begin calculations… type x = 42 then Enter to define a variable, =x^2+3 then Enter for a formula."></div>
       </div>
-      <div class="pg-footer">T4 Rev 31.03.23</div>
+      <div class="pg-footer">Alpha — updated 27.04.26</div>
     </div>
 
     <!-- Sidebar (only shown next to page 1) -->
@@ -1416,7 +1462,7 @@ function addPage() {
   // Footer
   const ftr = document.createElement('div');
   ftr.className = 'pg-footer';
-  ftr.textContent = 'T4 Rev 31.03.23';
+  ftr.textContent = 'Alpha — updated 27.04.26';
   page.appendChild(ftr);
 
   wrap.appendChild(page);
@@ -2139,8 +2185,42 @@ function buildSaveData() {
   return JSON.stringify({ version:2, meta:collectMeta(), pages, savedAt:new Date().toISOString() }, null, 2);
 }
 
+// ── Bug reporting ──────────────────────────────────────────────
+const BUG_KEY = 'calcpad_bugs';
+function openBugReport() {
+  document.getElementById('bugText').value = '';
+  document.getElementById('bugOverlay').classList.add('open');
+  document.getElementById('bugText').focus();
+}
+function closeBugReport() {
+  document.getElementById('bugOverlay').classList.remove('open');
+}
+document.getElementById('bugOverlay').addEventListener('mousedown', e => {
+  if (e.target === document.getElementById('bugOverlay')) closeBugReport();
+});
+function submitBugReport() {
+  const text = document.getElementById('bugText').value.trim();
+  if (!text) { closeBugReport(); return; }
+  try {
+    const bugs = JSON.parse(localStorage.getItem(BUG_KEY) || '[]');
+    bugs.push({ text, reportedAt: new Date().toISOString(), version: '27.04.26' });
+    localStorage.setItem(BUG_KEY, JSON.stringify(bugs, null, 2));
+  } catch(e) {}
+  closeBugReport();
+}
+function downloadBugLog() {
+  try {
+    const bugs = JSON.parse(localStorage.getItem(BUG_KEY) || '[]');
+    const txt = bugs.length
+      ? bugs.map((b,i)=>`--- Report ${i+1} (${b.reportedAt}) ---\n${b.text}`).join('\n\n')
+      : '(No bug reports yet)';
+    triggerDownload(txt, 'calcpad-bugs.txt');
+  } catch(e) {}
+}
+
 function triggerDownload(data, filename) {
-  const blob = new Blob([data], {type:'application/json'});
+  const mime = filename.endsWith('.txt') ? 'text/plain' : 'application/json';
+  const blob = new Blob([data], {type: mime});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href=url; a.download=filename;
   document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
