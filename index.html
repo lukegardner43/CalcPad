@@ -326,10 +326,10 @@ body{
 <div class="bug-overlay" id="bugOverlay">
   <div class="bug-modal">
     <h3>Report a Bug</h3>
-    <form id="bugForm" action="https://api.web3forms.com/submit" method="POST">
-      <input type="hidden" name="access_key" value="1e0a8a81-0eea-452c-8db5-d573d25ec68b">
-      <input type="hidden" name="subject" value="CalcPad Bug Report">
-      <input type="hidden" name="redirect" id="bugRedirect" value="">
+    <form id="bugForm" action="https://formsubmit.co/lgardner@perega.co.uk" method="POST">
+      <input type="hidden" name="_subject" value="CalcPad Bug Report">
+      <input type="hidden" name="_captcha" value="false">
+      <input type="hidden" name="_redirect" id="bugRedirect" value="">
       <input type="text" name="name" placeholder="Your name (optional)" style="width:100%;border:1px solid #ddd;border-radius:4px;padding:6px 8px;font-size:12px;font-family:Arial,sans-serif;box-sizing:border-box;margin-bottom:6px">
       <input type="email" name="email" placeholder="Your email (optional)" style="width:100%;border:1px solid #ddd;border-radius:4px;padding:6px 8px;font-size:12px;font-family:Arial,sans-serif;box-sizing:border-box;margin-bottom:6px">
       <textarea name="message" required placeholder="Describe what you were doing and what went wrong…" style="width:100%;height:100px;border:1px solid #ddd;border-radius:4px;padding:8px;font-size:12px;font-family:Arial,sans-serif;resize:vertical;box-sizing:border-box"></textarea>
@@ -2199,7 +2199,7 @@ document.getElementById('bugOverlay').addEventListener('mousedown', e => {
   if (e.target === document.getElementById('bugOverlay')) closeBugReport();
 });
 document.getElementById('bugForm').addEventListener('submit', () => {
-  document.getElementById('bugRedirect').value = window.location.href;
+  document.getElementById('bugRedirect').value = window.location.href + '?reported=1';
 });
 
 function triggerDownload(data, filename) {
