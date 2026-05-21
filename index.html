@@ -638,10 +638,22 @@ function preProcessUnitLiterals(expr) {
   // Simple "200mm" is handled by extractValueAndUnit and must not be touched here
   // or the unit information is lost.
   if (!/[+\-*/()\^,]/.test(expr)) return expr;
-  return expr.replace(_UNIT_LITERAL_RE, (_, num, unit) => {
+  return expr.replace(new RegExp(_UNIT_LITERAL_RE.source, 'g'), (_, num, unit) => {
     const f = UNIT_CONVERSIONS[unit];
     return f !== undefined ? String(parseFloat(num) * f) : _;
   });
+}
+
+// When evalUnitExpr can't determine the unit (e.g. SUM with literal values),
+// fall back to checking whether all unit literals in the expression share the
+// same SI base dimension.  Returns the base symbol ('m', 'N', …) or null.
+function inferUnitFromExprLiterals(expr) {
+  const matches = [...expr.matchAll(new RegExp(_UNIT_LITERAL_RE.source, 'g'))];
+  if (!matches.length) return null;
+  const bases = matches.map(m => UNIT_SI_BASE[m[2]]).filter(Boolean);
+  if (!bases.length) return null;
+  if (!bases.every(b => b === bases[0])) return null; // mixed dimensions
+  return bases[0];
 }
 
 function evalFormula(raw, variables) {
@@ -1732,7 +1744,11 @@ function rebuildVars() {
               chip.dataset.varVal = String(v);
               vars[name] = v;
               if (unit) { varUnits[name] = siUnit; }
-              else { const inf = evalUnitExpr(expr, varUnits); if (inf && Object.keys(inf).length) varUnits[name] = unitObjToStr(inf); }
+              else {
+                const inf = evalUnitExpr(expr, varUnits);
+                if (inf && Object.keys(inf).length) varUnits[name] = unitObjToStr(inf);
+                else { const lit = inferUnitFromExprLiterals(expr); if (lit) varUnits[name] = lit; }
+              }
               renderVarChipContent(chip);
             }
           } catch(e) {
@@ -1807,6 +1823,7 @@ document.addEventListener('keydown', e => {
         if (!unit) {
           const inferred = evalUnitExpr(exprStr, varUnits);
           if (inferred && Object.keys(inferred).length) { siUnit = unit = unitObjToStr(inferred); }
+          else { const lit = inferUnitFromExprLiterals(exprStr); if (lit) { siUnit = unit = lit; } }
         }
       } catch(err) {
         const ue = extractValueAndUnit(exprStr);
@@ -1893,6 +1910,11 @@ function commitFormula(ed) {
     let varVal, varUnit = '', varSiUnit = '', varExpr = formula;
     const evalVars = {...vars}; delete evalVars[varName];
     try { varVal = parseFloat(evalFormula(formula, evalVars).replace(/,/g, '')); } catch(e) { varVal = NaN; }
+    if (!isNaN(varVal) && !varUnit) {
+      const inferred = evalUnitExpr(formula, varUnits);
+      if (inferred && Object.keys(inferred).length) { varUnit = varSiUnit = unitObjToStr(inferred); }
+      else { const lit = inferUnitFromExprLiterals(formula); if (lit) { varUnit = varSiUnit = lit; } }
+    }
     if (isNaN(varVal)) {
       const ue = extractValueAndUnit(formula);
       if (ue) {
