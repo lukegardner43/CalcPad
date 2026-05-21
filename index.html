@@ -634,6 +634,10 @@ const MATH_CONSTS = { pi: Math.PI };
 // Longest units first so "mm" matches before "m", "min" before "m", etc.
 const _UNIT_LITERAL_RE = /(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(kPa|MPa|GPa|kN|MN|min|hr|deg|rad|ms|cm|km|kg|mm|Pa|N|m|g|s|t)\b/g;
 function preProcessUnitLiterals(expr) {
+  // Only preprocess inside complex expressions (containing operators/parens).
+  // Simple "200mm" is handled by extractValueAndUnit and must not be touched here
+  // or the unit information is lost.
+  if (!/[+\-*/()\^,]/.test(expr)) return expr;
   return expr.replace(_UNIT_LITERAL_RE, (_, num, unit) => {
     const f = UNIT_CONVERSIONS[unit];
     return f !== undefined ? String(parseFloat(num) * f) : _;
