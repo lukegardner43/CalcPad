@@ -224,6 +224,9 @@ body{
 .formula-chip{display:inline-flex;align-items:baseline;max-width:100%;cursor:default;user-select:none;vertical-align:middle}
 .formula-chip .katex{font-size:1em}
 .formula-chip.error{color:var(--rubine);font-style:italic}
+.var-dup-error{display:inline;color:var(--rubine);font-style:italic;font-size:11px;
+  border-bottom:1px dashed var(--rubine);cursor:default;user-select:none}
+.var-dup-error::after{content:' ⚠ already defined';font-size:10px;opacity:.8}
 .flhs{flex-shrink:0}
 .fseg-right{display:flex;flex-wrap:wrap;align-items:baseline;min-width:0}
 .fseg{display:inline-flex;align-items:baseline}
@@ -1784,8 +1787,12 @@ document.addEventListener('keydown', e => {
       }
       const existing = document.querySelector(`.var-def-chip[data-var-name="${CSS.escape(varName)}"]`);
       if (existing) {
-        node.style.color = 'var(--rubine)';
-        setTimeout(() => { node.style.color = ''; }, 1200);
+        e.preventDefault();
+        const errSpan = document.createElement('span');
+        errSpan.className = 'var-dup-error';
+        errSpan.contentEditable = 'false';
+        errSpan.textContent = node.textContent.trim();
+        node.replaceWith(errSpan);
         return;
       }
       e.preventDefault();
