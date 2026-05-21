@@ -1212,20 +1212,40 @@ function startEditVarChip(chip) {
   inp.value = chip.dataset.varVal;
   chip.appendChild(inp);
   inp.focus(); inp.select();
+  let done = false;
   function commit() {
-    const newVal = parseFloat(inp.value);
-    if (!isNaN(newVal)) {
-      chip.dataset.varVal = newVal;
+    if (done) return;
+    done = true;
+    const raw = inp.value.trim();
+    const isPlain = raw !== '' && /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(raw);
+    if (isPlain) {
+      const newVal = parseFloat(raw);
+      chip.dataset.varVal = String(newVal);
+      delete chip.dataset.varExpr;
       valSpan.textContent = fmtNum(newVal);
+    } else if (raw) {
+      // Treat as formula expression — let rebuildVars evaluate and render
+      chip.dataset.varExpr = raw;
+      delete chip.dataset.varUnit;
+      delete chip.dataset.varSiUnit;
+      delete chip.dataset.varOrigNum;
+      delete chip.dataset.varDisplayUnit;
     }
     valSpan.style.display = '';
     chip.classList.remove('editing-val');
     inp.remove();
     rebuildVars();
   }
+  function cancel() {
+    if (done) return;
+    done = true;
+    valSpan.style.display = '';
+    chip.classList.remove('editing-val');
+    inp.remove();
+  }
   inp.addEventListener('keydown', e => {
     if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); commit(); }
-    if (e.key === 'Escape') { valSpan.style.display = ''; chip.classList.remove('editing-val'); inp.remove(); }
+    if (e.key === 'Escape') cancel();
     e.stopPropagation();
   });
   inp.addEventListener('blur', commit);
@@ -2138,6 +2158,12 @@ function attachImageHandlers(wrap) {
   });
 }
 document.addEventListener('mousedown', e => { if (!e.target.closest('.calc-img-wrap')) deselectAllImages(); });
+document.addEventListener('mousedown', e => {
+  if (formulaBuffer === null) return;
+  const ed = getActiveEditor();
+  if (!ed || ed.contains(e.target)) return;
+  commitFormula(ed);
+});
 document.addEventListener('keydown', e => {
   if (selectedImg && (e.key === 'Delete' || e.key === 'Backspace')) {
     let active = document.activeElement;
