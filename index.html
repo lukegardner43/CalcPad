@@ -630,6 +630,16 @@ const FUNS = {
 
 const MATH_CONSTS = { pi: Math.PI };
 
+// Pre-process unit literals inside expressions: "4mm" → 0.004, "6kN" → 6000.
+// Longest units first so "mm" matches before "m", "min" before "m", etc.
+const _UNIT_LITERAL_RE = /(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(kPa|MPa|GPa|kN|MN|min|hr|deg|rad|ms|cm|km|kg|mm|Pa|N|m|g|s|t)\b/g;
+function preProcessUnitLiterals(expr) {
+  return expr.replace(_UNIT_LITERAL_RE, (_, num, unit) => {
+    const f = UNIT_CONVERSIONS[unit];
+    return f !== undefined ? String(parseFloat(num) * f) : _;
+  });
+}
+
 function evalFormula(raw, variables) {
   // Built-in constants are available unless the user has defined a variable with the same name
   const variables_ = { ...MATH_CONSTS, ...variables };
@@ -644,6 +654,7 @@ function evalFormula(raw, variables) {
     return FUNS[up] ? up + m.slice(name.length) : m;
   });
   expr = expr.replace(/\^/g, '**');
+  expr = preProcessUnitLiterals(expr);
   const vnames = Object.keys(variables_).sort((a,b) => b.length - a.length);
   for (const vn of vnames)
     expr = expr.replace(new RegExp(`\\b${vn}\\b`, 'g'), `(${variables_[vn]})`);
@@ -776,14 +787,30 @@ const UNIT_SI_BASE = {
   s: 's', ms: 's', min: 's', hr: 's',
   deg: 'rad', rad: 'rad',
 };
-// Convert a unit-object to SI base symbols, e.g. {mm:4} → {m:4}, {kN:1,mm:-2} → {N:1,m:-2}
+// Decompose derived SI units into base dimensions {kg, m, s, rad}
+const UNIT_SI_DECOMP = {
+  N:  { kg: 1, m: 1, s: -2 },
+  Pa: { kg: 1, m: -1, s: -2 },
+  J:  { kg: 1, m: 2, s: -2 },
+  W:  { kg: 1, m: 2, s: -3 },
+  Hz: { s: -1 },
+};
+// Convert a unit-object to SI base dimensions, expanding derived units (N→kg·m/s², etc.)
 function unitObjToSIBase(u) {
   if (!u) return {};
   const r = {};
   for (const [sym, exp] of Object.entries(u)) {
-    const base = UNIT_SI_BASE[sym] || sym;
-    r[base] = (r[base] || 0) + exp;
-    if (!r[base]) delete r[base];
+    const norm = UNIT_SI_BASE[sym] || sym;  // kN→N, MPa→Pa, etc.
+    const decomp = UNIT_SI_DECOMP[norm];
+    if (decomp) {
+      for (const [base, e] of Object.entries(decomp)) {
+        r[base] = (r[base] || 0) + e * exp;
+        if (!r[base]) delete r[base];
+      }
+    } else {
+      r[norm] = (r[norm] || 0) + exp;
+      if (!r[norm]) delete r[norm];
+    }
   }
   return r;
 }
@@ -1770,7 +1797,8 @@ document.addEventListener('keydown', e => {
       if (dispUnitMatch && dispUnitMatch[1].trim()) { exprStr = dispUnitMatch[1].trim(); dispUnit = dispUnitMatch[2].trim(); }
       let val, unit = '', siUnit = '';
       try {
-        val = parseFloat(evalFormula(exprStr, vars).replace(/,/g, ''));
+        const evalVars = {...vars}; delete evalVars[varName];
+        val = parseFloat(evalFormula(exprStr, evalVars).replace(/,/g, ''));
         if (isNaN(val)) throw new Error('NaN');
         if (!unit) {
           const inferred = evalUnitExpr(exprStr, varUnits);
@@ -1827,8 +1855,8 @@ document.addEventListener('input', e => {
     const text = node.textContent;
     const pos = range.startOffset;
     if (text[pos - 1] === '=') {
-      let before = text[pos - 2];
-      if (pos <= 1 || before === ' ' || before === '\n' || before === '\u00A0')
+      const before = text[pos - 2];
+      if (pos <= 1 || /[\s\u00A0\n]/.test(before) || /[a-zA-Z0-9_]/.test(before))
         formulaBuffer = '';
     }
   }
@@ -1859,7 +1887,8 @@ function commitFormula(ed) {
     const varName = varEndMatch[2];
     const prefix  = varEndMatch[1] || '';
     let varVal, varUnit = '', varSiUnit = '', varExpr = formula;
-    try { varVal = parseFloat(evalFormula(formula, vars).replace(/,/g, '')); } catch(e) { varVal = NaN; }
+    const evalVars = {...vars}; delete evalVars[varName];
+    try { varVal = parseFloat(evalFormula(formula, evalVars).replace(/,/g, '')); } catch(e) { varVal = NaN; }
     if (isNaN(varVal)) {
       const ue = extractValueAndUnit(formula);
       if (ue) {
@@ -1872,11 +1901,13 @@ function commitFormula(ed) {
     if (!isNaN(varVal)) {
       const parent = node.parentNode;
       const frag = document.createDocumentFragment();
-      if (prefix) frag.appendChild(document.createTextNode(prefix));
+      let prefixNode = null;
+      if (prefix) { prefixNode = document.createTextNode(prefix); frag.appendChild(prefixNode); }
       frag.appendChild(makeVarDefChip(varName, varVal, varExpr, varUnit, varSiUnit, outputUnit));
       const spacer = document.createTextNode(' ');
       frag.appendChild(spacer);
       parent.replaceChild(frag, node);
+      if (prefixNode) autoCommitResidual(prefixNode);
       const r = document.createRange();
       r.setStartAfter(spacer); r.collapse(true);
       sel.removeAllRanges(); sel.addRange(r);
@@ -1891,11 +1922,13 @@ function commitFormula(ed) {
   catch(ex) { result = ex.message || 'Error'; isError = true; }
   const parent = node.parentNode;
   const frag = document.createDocumentFragment();
-  if (before) frag.appendChild(document.createTextNode(before));
+  let beforeNode = null;
+  if (before) { beforeNode = document.createTextNode(before); frag.appendChild(beforeNode); }
   frag.appendChild(makeFormulaChip(formula, result, isError, outputUnit));
   const spacer = document.createTextNode('\u00A0');
   frag.appendChild(spacer);
   parent.replaceChild(frag, node);
+  if (beforeNode) autoCommitResidual(beforeNode);
   const r = document.createRange();
   r.setStartAfter(spacer); r.collapse(true);
   sel.removeAllRanges(); sel.addRange(r);
@@ -1903,6 +1936,45 @@ function commitFormula(ed) {
 }
 
 function cancelFormula() { formulaBuffer = null; }
+
+// After committing a chip, auto-commit any remaining formula in the prefix text node.
+// This handles cases like "A = 3  B = 4" typed on one line — both get committed.
+function autoCommitResidual(textNode) {
+  if (!textNode || textNode.nodeType !== Node.TEXT_NODE || !textNode.parentNode) return;
+  const text = textNode.textContent.trim();
+  const eqIdx = text.lastIndexOf('=');
+  if (eqIdx === -1) return;
+  const formulaPart = text.slice(eqIdx + 1).trim();
+  if (!formulaPart) return;
+  const beforePart = text.slice(0, eqIdx);
+  const varMatch = beforePart.trimEnd().match(/^([\s\S]*\s)?([a-zA-Z][a-zA-Z0-9_]*)$/);
+  if (!varMatch) return;
+  const varName = varMatch[2];
+  const prefix = varMatch[1] || '';
+  if (document.querySelector(`.var-def-chip[data-var-name="${CSS.escape(varName)}"]`)) return;
+  let varVal, varUnit = '', varSiUnit = '', varExpr = formulaPart;
+  let outputUnit = '';
+  const unitSpec = formulaPart.match(/^(.*?)\s*\[([^\]]+)\]\s*$/);
+  if (unitSpec) { varExpr = unitSpec[1].trim(); outputUnit = unitSpec[2].trim(); }
+  const evalVars = {...vars}; delete evalVars[varName];
+  try { varVal = parseFloat(evalFormula(varExpr, evalVars).replace(/,/g, '')); } catch(e) { varVal = NaN; }
+  if (isNaN(varVal)) {
+    const ue = extractValueAndUnit(varExpr);
+    if (!ue) return;
+    varUnit = ue.unit; varExpr = ue.numStr;
+    const conv = applyUnitConversion(ue.val, varUnit);
+    if (conv) { varVal = conv.siVal; varSiUnit = conv.siUnitStr; }
+    else { varVal = ue.val; varSiUnit = varUnit; }
+  }
+  if (isNaN(varVal)) return;
+  const parent = textNode.parentNode;
+  const frag = document.createDocumentFragment();
+  let prefixNode = null;
+  if (prefix) { prefixNode = document.createTextNode(prefix); frag.appendChild(prefixNode); }
+  frag.appendChild(makeVarDefChip(varName, varVal, varExpr, varUnit, varSiUnit, outputUnit));
+  parent.replaceChild(frag, textNode);
+  if (prefixNode) autoCommitResidual(prefixNode);
+}
 
 // Click a formula chip to expand it back to editable text
 document.addEventListener('click', e => {
