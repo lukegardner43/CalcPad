@@ -1217,19 +1217,52 @@ function startEditVarChip(chip) {
     if (done) return;
     done = true;
     const raw = inp.value.trim();
-    const isPlain = raw !== '' && /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(raw);
-    if (isPlain) {
-      const newVal = parseFloat(raw);
-      chip.dataset.varVal = String(newVal);
-      delete chip.dataset.varExpr;
-      valSpan.textContent = fmtNum(newVal);
-    } else if (raw) {
-      // Treat as formula expression — let rebuildVars evaluate and render
-      chip.dataset.varExpr = raw;
-      delete chip.dataset.varUnit;
-      delete chip.dataset.varSiUnit;
-      delete chip.dataset.varOrigNum;
-      delete chip.dataset.varDisplayUnit;
+    if (raw) {
+      const isPlain = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(raw);
+      if (isPlain) {
+        chip.dataset.varVal = String(parseFloat(raw));
+        delete chip.dataset.varExpr;
+        delete chip.dataset.varUnit;
+        delete chip.dataset.varSiUnit;
+        delete chip.dataset.varOrigNum;
+        delete chip.dataset.varDisplayUnit;
+      } else {
+        // Try to evaluate as formula (may reference other vars)
+        let evaluated = false;
+        const evalVars = {...vars}; delete evalVars[chip.dataset.varName];
+        try {
+          const v = parseFloat(evalFormula(raw, evalVars).replace(/,/g, ''));
+          if (!isNaN(v)) {
+            chip.dataset.varExpr = raw;
+            delete chip.dataset.varUnit;
+            delete chip.dataset.varSiUnit;
+            delete chip.dataset.varOrigNum;
+            delete chip.dataset.varDisplayUnit;
+            evaluated = true;
+          }
+        } catch(e) { /* fall through */ }
+        if (!evaluated) {
+          // Try unit literal like 10kN
+          const ue = extractValueAndUnit(raw);
+          if (ue) {
+            const conv = applyUnitConversion(ue.val, ue.unit);
+            chip.dataset.varVal = String(conv ? conv.siVal : ue.val);
+            chip.dataset.varExpr = ue.numStr;
+            chip.dataset.varUnit = ue.unit;
+            chip.dataset.varSiUnit = conv ? conv.siUnitStr : ue.unit;
+            delete chip.dataset.varOrigNum;
+            delete chip.dataset.varDisplayUnit;
+            delete chip.dataset.evalError;
+          } else {
+            // Store as formula and let rebuildVars handle/error
+            chip.dataset.varExpr = raw;
+            delete chip.dataset.varUnit;
+            delete chip.dataset.varSiUnit;
+            delete chip.dataset.varOrigNum;
+            delete chip.dataset.varDisplayUnit;
+          }
+        }
+      }
     }
     valSpan.style.display = '';
     chip.classList.remove('editing-val');
