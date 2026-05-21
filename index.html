@@ -1844,7 +1844,22 @@ document.addEventListener('keydown', e => {
         }
       } catch(err) {
         const ue = extractValueAndUnit(exprStr);
-        if (!ue) return;
+        if (!ue) {
+          // Expression can't be evaluated (e.g. self-reference) — commit as error chip
+          e.preventDefault();
+          const errChip = makeVarDefChip(varName, NaN, exprStr, '', '', dispUnit);
+          errChip.dataset.evalError = err.message || 'cannot evaluate';
+          renderVarChipContent(errChip);
+          const parent = node.parentNode;
+          const frag = document.createDocumentFragment();
+          if (prefix) frag.appendChild(document.createTextNode(prefix));
+          frag.appendChild(errChip);
+          const spacer = document.createTextNode(' ');
+          frag.appendChild(spacer);
+          parent.replaceChild(frag, node);
+          rebuildVars();
+          return;
+        }
         const origNumStr = ue.numStr;
         unit = ue.unit; exprStr = origNumStr;
         const conv = applyUnitConversion(ue.val, unit);
@@ -1941,13 +1956,18 @@ function commitFormula(ed) {
         else { varVal = ue.val; varSiUnit = varUnit; }
       }
     }
-    if (!isNaN(varVal)) {
+    // Commit chip whether valid or error — don't fall through to formula chip
+    {
       const parent = node.parentNode;
       const frag = document.createDocumentFragment();
       let prefixNode = null;
       if (prefix) { prefixNode = document.createTextNode(prefix); frag.appendChild(prefixNode); }
-      frag.appendChild(makeVarDefChip(varName, varVal, varExpr, varUnit, varSiUnit, outputUnit));
-      const spacer = document.createTextNode(' ');
+      const chip = isNaN(varVal)
+        ? makeVarDefChip(varName, NaN, formula, '', '', outputUnit)
+        : makeVarDefChip(varName, varVal, varExpr, varUnit, varSiUnit, outputUnit);
+      if (isNaN(varVal)) { chip.dataset.evalError = 'cannot evaluate'; renderVarChipContent(chip); }
+      frag.appendChild(chip);
+      const spacer = document.createTextNode(' ');
       frag.appendChild(spacer);
       parent.replaceChild(frag, node);
       if (prefixNode) autoCommitResidual(prefixNode);
