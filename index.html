@@ -311,11 +311,6 @@ body{
     break-before:always;
   }
 
-  /* iOS: @page{margin:0} is ignored — system margins reduce printable height to ~273mm.
-     100vh in print media = printable page height (after system margins), so this fills
-     the paper correctly on any iOS printer without overflowing. */
-  body.ios-print .a4-page{height:100vh!important;max-height:100vh!important;overflow:hidden!important}
-
   .pg-header{padding:10mm 14mm 3mm}
   .pg-content{margin:0 14mm;height:auto;flex:1;overflow:hidden}
   .calc-area{
@@ -597,19 +592,15 @@ function triggerPrint() {
   }
 }
 
-// Reinforce html/body height:auto at print time (iOS Safari may not honour
-// @media print cascade alone for the root element height).
-// On iOS: add ios-print class so natural-height layout rules kick in —
-// iOS ignores @page{margin:0} so a fixed 297mm page overflows the printable area.
+// iOS Safari sets html to full viewport height (>297mm on iPad) at print time,
+// generating a blank second page. Force auto-height so html/body wrap to content only.
 window.addEventListener('beforeprint', function() {
   document.documentElement.style.height = 'auto';
   document.body.style.height = 'auto';
-  if (_isIOS) document.body.classList.add('ios-print');
 });
 window.addEventListener('afterprint', function() {
   document.documentElement.style.height = '';
   document.body.style.height = '';
-  document.body.classList.remove('ios-print');
 });
 
 
