@@ -683,6 +683,9 @@ function evalFormula(raw, variables) {
   const vnames = Object.keys(variables_).sort((a,b) => b.length - a.length);
   for (const vn of vnames)
     expr = expr.replace(new RegExp(`\\b${vn}\\b`, 'g'), `(${variables_[vn]})`);
+  // Detect 0**0 after substitution — result would be 1 but mathematically indeterminate
+  if (/\(0\)\s*\*\*\s*\(0\)/.test(expr) || /(?<![*])\b0\s*\*\*\s*0\b(?![*])/.test(expr))
+    throw new Error('0^0 is indeterminate');
   let safe = expr.replace(/\b([A-Z_]+)\s*\(/g, (_,nm) => {
     if (FUNS[nm]) return `__F.${nm}(`;
     throw new Error(`Unknown: ${nm}`);
@@ -781,9 +784,9 @@ function evalUnitExpr(formula, varUnitsMap) {
   const peek=()=>toks[pos], consume=()=>toks[pos++], eat=t=>{if(peek().t===t){consume();return true;}return false;};
   const eq=(a,b)=>{if(!a||!b)return false;const ka=Object.keys(a),kb=Object.keys(b);return ka.length===kb.length&&ka.every(k=>a[k]===b[k]);};
   function parseExpr(){let l=parseTerm();while(peek().t==='+'||peek().t==='-'){consume();const r=parseTerm();if(l===null)l=r;else if(r!==null&&!eq(l,r))l=null;}return l;}
-  function parseTerm(){let l=parsePower();while(peek().t==='*'||peek().t==='/'){const op=consume().t;const r=parsePower();l=op==='*'?unitMul(l,r):unitDiv(l,r);}return l;}
-  function parsePower(){const base=parseUnary();if(peek().t==='^'){consume();let sign=1;if(peek().t==='-'){consume();sign=-1;}else if(peek().t==='+')consume();if(peek().t==='num'){const n=parseFloat(consume().v)*sign;return unitPow(base,n);}parsePrimary();return null;}return base;}
-  function parseUnary(){if(peek().t==='-'||peek().t==='+'){consume();return parseUnary();}return parsePrimary();}
+  function parseTerm(){let l=parseUnary();while(peek().t==='*'||peek().t==='/'){const op=consume().t;const r=parseUnary();l=op==='*'?unitMul(l,r):unitDiv(l,r);}return l;}
+  function parseUnary(){if(peek().t==='-'||peek().t==='+'){consume();return parseUnary();}return parsePower();}
+  function parsePower(){const base=parsePrimary();if(peek().t==='^'){consume();let sign=1;if(peek().t==='-'){consume();sign=-1;}else if(peek().t==='+')consume();if(peek().t==='num'){const n=parseFloat(consume().v)*sign;return unitPow(base,n);}parseUnary();return null;}return base;}
   function parsePrimary(){const tok=peek();if(tok.t==='('){consume();const r=parseExpr();eat(')');return r;}if(tok.t==='num'){consume();if(peek().t==='id'&&Object.prototype.hasOwnProperty.call(UNIT_CONVERSIONS,peek().v)){const u=consume().v;return parseUnitStr(UNIT_SI_BASE[u]||u);}return{};}if(tok.t==='id'){consume();if(peek().t==='('){consume();let d=1;while(d>0&&peek().t!=='EOF'){const t=consume();if(t.t==='(')d++;else if(t.t===')')d--;}return null;}const u=varUnitsMap[tok.v];return u?parseUnitStr(u):{};}consume();return null;}
   try{return parseExpr();}catch(e){return null;}
 }
@@ -950,7 +953,7 @@ function nameToLatex(name) {
   return baseLatex + '_{' + subLatex + '}';
 }
 
-function toLatex(rawFormula, subsMap) {
+function toLatex(rawFormula, subsMap, assumedUnit) {
   let formula = rawFormula;
   // Normalise function names to uppercase before tokenising
   formula = formula.replace(/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*(?=\()/g, (m, name) => {
@@ -1006,10 +1009,10 @@ function toLatex(rawFormula, subsMap) {
   }
 
   function parseTerm() {
-    let left = parsePower();
+    let left = parseUnary();
     while (peek().t === '*' || peek().t === '/') {
       const op = consume().t;
-      const right = parsePower();
+      const right = parseUnary();
       if (op === '/') {
         left = '\\dfrac{' + stripParens(left) + '}{' + stripParens(right) + '}';
       } else {
@@ -1019,20 +1022,23 @@ function toLatex(rawFormula, subsMap) {
     return left;
   }
 
+  // parseUnary has lower precedence than ^ so -a^2 renders as -(a^2) not (-a)^2
+  function parseUnary() {
+    if (peek().t === '-') { consume(); return '-' + parseUnary(); }
+    if (peek().t === '+') { consume(); return parseUnary(); }
+    return parsePower();
+  }
+
+  // parsePower uses parsePrimary for the base and parseUnary for the exponent,
+  // giving right-associativity: 2^2^2 = 2^(2^2) = 2^{2^{2}}
   function parsePower() {
-    let base = parseUnary();
+    const base = parsePrimary();
     if (peek().t === '^') {
       consume();
       const exp = parseUnary();
       return '{' + base + '}^{' + stripParens(exp) + '}';
     }
     return base;
-  }
-
-  function parseUnary() {
-    if (peek().t === '-') { consume(); return '-' + parsePrimary(); }
-    if (peek().t === '+') { consume(); return parsePrimary(); }
-    return parsePrimary();
   }
 
   function parsePrimary() {
@@ -1050,7 +1056,7 @@ function toLatex(rawFormula, subsMap) {
         const unitTok = consume();
         return numToLatex(tok.v) + unitToLatex(unitTok.v);
       }
-      return numToLatex(tok.v);
+      return numToLatex(tok.v) + (assumedUnit ? unitToLatex(assumedUnit) : '');
     }
     if (tok.t === 'id') {
       consume();
@@ -1159,7 +1165,7 @@ function renderVarChipContent(chip) {
       displayValStr = fmtNumDisplay(val);
     }
     try {
-      const latexExpr = toLatex(expr) + (unitAssumed ? '\\,{\\color{gray}[\\text{' + unit + '}]}' : '');
+      const latexExpr = toLatex(expr, null, unitAssumed ? unit : null);
       const latexVal  = numToLatex(displayValStr) + exprUnitSuffix;
       const nameLatex = nameToLatex(name);
       const sub = toLatexSubstituted(expr, vars, varUnits);
