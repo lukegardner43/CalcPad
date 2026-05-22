@@ -228,6 +228,7 @@ body{
 .var-dup-error{display:inline;color:var(--rubine);font-style:italic;font-size:11px;
   border-bottom:1px dashed var(--rubine);cursor:default;user-select:none}
 .var-dup-error::after{content:' ⚠ already defined';font-size:10px;opacity:.8}
+.unit-shadow-warn{color:#c97b00;font-size:9px;vertical-align:super;margin-left:2px;cursor:default;user-select:none}
 .flhs{flex-shrink:0}
 .fseg-right{display:flex;flex-wrap:wrap;align-items:baseline;min-width:0}
 .fseg{display:inline-flex;align-items:baseline}
@@ -1249,6 +1250,15 @@ function renderVarChipContent(chip) {
     }
     chip.title = `Variable "${name}" = ${fmtNum(val)} — click value to edit`;
     chip.querySelector('.vdc-val').addEventListener('click', () => startEditVarChip(chip));
+  }
+  // Warn if the variable name shadows a known unit symbol
+  if (Object.prototype.hasOwnProperty.call(UNIT_CONVERSIONS, name)) {
+    const warn = document.createElement('span');
+    warn.className = 'unit-shadow-warn';
+    warn.textContent = '⚠';
+    warn.title = `"${name}" is a recognised unit symbol — expressions like "5${name}" will use this variable, not the ${name} unit`;
+    chip.appendChild(warn);
+    chip.title += `\n⚠ "${name}" shadows the ${name} unit`;
   }
 }
 
