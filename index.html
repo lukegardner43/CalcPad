@@ -235,7 +235,7 @@ body{
 
 /* Table styles */
 .calc-table{width:100%;border-collapse:collapse;margin:4px 0;font-size:11px;table-layout:fixed}
-.calc-table td,.calc-table th{border:1px solid var(--bdr);padding:3px 6px;vertical-align:top;word-break:break-word;outline:none}
+.calc-table td,.calc-table th{border:1px solid var(--bdr);padding:3px 6px;vertical-align:top;word-break:break-word;outline:none;min-width:60px;min-height:24px}
 .calc-table th{background:#f0f0f0;font-weight:700;text-align:left}
 .calc-table td:focus,.calc-table th:focus{background:#fff8fe;outline:2px solid var(--rubine);outline-offset:-2px}
 .calc-table tr{break-inside:avoid;page-break-inside:avoid}
@@ -269,6 +269,10 @@ body{
 .sb{padding:6px;min-height:40px}
 .se{font-size:10px;color:var(--mid);text-align:center;padding:10px 6px;line-height:1.6}
 .se code{color:var(--purple);background:#eceaf8;padding:0 3px;border-radius:2px}
+.vs-row{display:flex;align-items:baseline;gap:4px;padding:2px 4px;border-bottom:1px solid #f0eef8;flex-wrap:wrap}
+.vs-name{color:var(--purple);flex-shrink:0}.vs-name .katex{font-size:11px}
+.vs-eq{color:var(--mid);font-size:11px;flex-shrink:0}
+.vs-val{color:#333;font-size:11px;min-width:0;word-break:break-all}
 .sr{display:flex;align-items:center;padding:3px 6px;border-bottom:1px solid #eee;font-style:italic}
 .sn{font-size:10px;color:var(--dark);flex:1}.sq{font-size:10px;color:var(--mid);margin:0 3px}.sv{font-size:10px;color:var(--dark);white-space:nowrap}
 .sref{border-top:1px solid #ddd;padding:8px 10px 10px}
@@ -598,10 +602,13 @@ function renderSidebar() {
         }
       }
     }
+    let nameHtml;
+    try { nameHtml = katex.renderToString(nameToLatex(name), {displayMode:false, throwOnError:false, output:'html'}); }
+    catch(e) { nameHtml = name; }
     const row = document.createElement('div');
     row.className = 'vs-row';
     row.innerHTML =
-      `<span class="vs-name">${name}</span>` +
+      `<span class="vs-name">${nameHtml}</span>` +
       `<span class="vs-eq">=</span>` +
       `<span class="vs-val">${dispVal}${unit ? ' ' + unit : ''}</span>`;
     list.appendChild(row);
@@ -932,8 +939,13 @@ function nameToLatex(name) {
   }
 
   if (!sub) return baseLatex;
-  // Numeric-only subscripts render as plain digits; others recurse
-  const subLatex = /^\d+$/.test(sub) ? sub : nameToLatex(sub);
+  // Multi-part subscripts: F_a_b → F_{a,b}. Each part rendered flat (no nesting).
+  const subLatex = sub.split('_').map(p => {
+    if (/^\d+$/.test(p)) return p;
+    const gCmd = GREEK[p.toLowerCase()];
+    if (gCmd) { const up = /^[A-Z]/.test(p); return '\\' + (up ? gCmd[0].toUpperCase()+gCmd.slice(1) : gCmd); }
+    return p.length === 1 ? p : '\\text{' + p + '}';
+  }).join(',');
   return baseLatex + '_{' + subLatex + '}';
 }
 
