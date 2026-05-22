@@ -300,9 +300,13 @@ body{
     width:210mm;min-height:297mm;
     box-shadow:none;
     page-break-after:always;
-    overflow:visible;
+    break-after:always;
+    overflow:hidden;
   }
-  .a4-page:last-of-type{page-break-after:avoid}
+  .page-wrap:last-child .a4-page{
+    page-break-after:avoid;
+    break-after:avoid;
+  }
 
   .pg-header{padding:10mm 14mm 3mm}
   .pg-content{margin:0 14mm;height:auto;flex:1;overflow:hidden}
