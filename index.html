@@ -301,10 +301,10 @@ body{
   .page-wrap{display:block}
 
   /* Desktop: fixed A4 height, content clipped at page boundary.
-     288mm (not full 297mm) leaves ~9mm buffer for iOS AirPrint system margins
+     287mm (not full 297mm) leaves ~10mm buffer for iOS AirPrint system margins
      so the footer doesn't overflow onto a second page. */
   .a4-page{
-    width:210mm;height:288mm;max-height:288mm;
+    width:210mm;height:287mm;max-height:287mm;
     box-shadow:none;
     overflow:hidden;
   }
@@ -529,7 +529,7 @@ body{
         <div id="editor" class="calc-area" contenteditable="true" spellcheck="true"
           data-placeholder="Begin calculations… type x = 42 then Enter to define a variable, =x^2+3 then Enter for a formula."></div>
       </div>
-      <div class="pg-footer">Alpha — updated 22.05.26 [288]</div>
+      <div class="pg-footer">Alpha — updated 22.05.26 [287]</div>
     </div>
 
     <!-- Sidebar (only shown next to page 1) -->
@@ -1717,7 +1717,7 @@ function addPage() {
   // Footer
   const ftr = document.createElement('div');
   ftr.className = 'pg-footer';
-  ftr.textContent = 'Alpha — updated 22.05.26 [288]';
+  ftr.textContent = 'Alpha — updated 22.05.26 [287]';
   page.appendChild(ftr);
 
   wrap.appendChild(page);
