@@ -1130,6 +1130,13 @@ function renderVarChipContent(chip) {
     const displayUnit = chip.dataset.varDisplayUnit || '';
     const rawExprUnit = evalUnitExpr(expr, varUnits);
     const exprUnit = rawExprUnit && Object.keys(rawExprUnit).length ? unitObjToSIBase(rawExprUnit) : rawExprUnit;
+    // Check for unit mismatch in top-level addition/subtraction
+    if (!displayUnit && rawExprUnit === null && hasTopLevelAddSub(expr)) {
+      chip.classList.add('error');
+      chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">${name} = ⚠ unit mismatch</span>`;
+      chip.title = 'Expression adds/subtracts quantities with incompatible units';
+      return;
+    }
     // Check for unit dimension mismatch when a display unit is specified
     if (displayUnit && exprUnit && Object.keys(exprUnit).length) {
       const specBase = unitObjToSIBase(parseUnitStr(displayUnit));
@@ -1830,6 +1837,18 @@ function getAllEditors() {
   return Array.from(document.querySelectorAll('.calc-area'));
 }
 
+// Returns true if expr has a + or - operator at paren-depth 0 (i.e. a top-level addition/subtraction)
+function hasTopLevelAddSub(expr) {
+  let depth = 0;
+  for (let i = 0; i < expr.length; i++) {
+    const c = expr[i];
+    if (c === '(' || c === '[') depth++;
+    else if (c === ')' || c === ']') depth--;
+    else if (depth === 0 && i > 0 && (c === '+' || c === '-')) return true;
+  }
+  return false;
+}
+
 // Override rebuildVars to scan all editors in document order (vars then formulas interleaved)
 function rebuildVars() {
   vars = {};
@@ -1846,15 +1865,25 @@ function rebuildVars() {
           try {
             const v = parseFloat(evalFormula(expr, vars).replace(/,/g, ''));
             if (!isNaN(v)) {
-              delete chip.dataset.evalError;
-              chip.dataset.varVal = String(v);
-              vars[name] = v;
               if (unit) { varUnits[name] = siUnit; }
               else {
                 const inf = evalUnitExpr(expr, varUnits);
-                if (inf && Object.keys(inf).length) varUnits[name] = unitObjToStr(unitObjToSIBase(inf));
-                else { const lit = inferUnitFromExprLiterals(expr); if (lit) varUnits[name] = lit; }
+                if (inf && Object.keys(inf).length) {
+                  varUnits[name] = unitObjToStr(unitObjToSIBase(inf));
+                } else if (inf === null && hasTopLevelAddSub(expr)) {
+                  // Unit mismatch: top-level addition between incompatible dimensions
+                  chip.dataset.evalError = 'unit mismatch';
+                  chip.dataset.varVal = String(v);
+                  vars[name] = v; // keep numeric for any dependent formulas
+                  renderVarChipContent(chip);
+                  return;
+                } else {
+                  const lit = inferUnitFromExprLiterals(expr); if (lit) varUnits[name] = lit;
+                }
               }
+              delete chip.dataset.evalError;
+              chip.dataset.varVal = String(v);
+              vars[name] = v;
               renderVarChipContent(chip);
             }
           } catch(e) {
