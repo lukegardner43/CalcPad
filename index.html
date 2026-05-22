@@ -1183,22 +1183,55 @@ function renderVarChipContent(chip) {
     chip.innerHTML = inner;
     chip.title = `${name} = ${expr} = ${displayValStr}${displayUnit ? ' ' + displayUnit : (unit ? ' ' + unit : '')}`;
   } else if (unit) {
-    // Render:  name = origValue unit  (show the value the user typed, not the SI-converted internal value)
-    const displayVal = chip.dataset.varOrigNum || fmtNum(val);
-    try {
-      const nameLatex = nameToLatex(name);
-      const valLatex  = numToLatex(displayVal) + unitToLatex(unit);
-      const katexHtml = katex.renderToString(
-        nameLatex + ' = ' + valLatex,
-        { displayMode: false, throwOnError: false, output: 'html' }
-      );
-      chip.innerHTML = `<span class="vdc-name">${katexHtml}</span>`;
-    } catch(e) {
-      chip.innerHTML = `<span class="vdc-name">${name} = </span><span class="vdc-val">${displayVal} ${unit}</span>`;
+    // Render:  name = origValue inputUnit [= convertedValue outputUnit]
+    const origDisplayVal = chip.dataset.varOrigNum || fmtNum(val);
+    const displayUnit = chip.dataset.varDisplayUnit || '';
+    if (displayUnit) {
+      // Validate dimension compatibility between input unit and output unit
+      const inDim  = unitObjToSIBase(parseUnitStr(unit));
+      const outDim = unitObjToSIBase(parseUnitStr(displayUnit));
+      if (Object.keys(outDim).length && !unitObjEq(inDim, outDim)) {
+        chip.classList.add('error');
+        chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">${name}: unit mismatch [${unit}] vs [${displayUnit}]</span>`;
+        chip.title = `Unit mismatch: value is in [${unit}] but [${displayUnit}] was specified`;
+        return;
+      }
+      // Show input value and converted output value
+      const dFactor = getUnitConversionFactor(parseUnitStr(displayUnit));
+      const outVal = fmtNumDisplay(dFactor !== null ? val / dFactor : val);
+      try {
+        const kx = s => katex.renderToString(s, {displayMode:false, throwOnError:false, output:'html'});
+        const katexHtml = kx(nameToLatex(name) + ' = ' + numToLatex(origDisplayVal) + unitToLatex(unit)
+          + ' = ' + numToLatex(outVal) + unitToLatex(displayUnit));
+        chip.innerHTML = `<span class="vdc-name">${katexHtml}</span>`;
+      } catch(e) {
+        chip.innerHTML = `<span class="vdc-name">${name} = ${origDisplayVal} ${unit} = ${outVal} ${displayUnit}</span>`;
+      }
+      chip.title = `Variable "${name}" = ${origDisplayVal} ${unit} = ${outVal} ${displayUnit}`;
+    } else {
+      try {
+        const nameLatex = nameToLatex(name);
+        const valLatex  = numToLatex(origDisplayVal) + unitToLatex(unit);
+        const katexHtml = katex.renderToString(
+          nameLatex + ' = ' + valLatex,
+          { displayMode: false, throwOnError: false, output: 'html' }
+        );
+        chip.innerHTML = `<span class="vdc-name">${katexHtml}</span>`;
+      } catch(e) {
+        chip.innerHTML = `<span class="vdc-name">${name} = </span><span class="vdc-val">${origDisplayVal} ${unit}</span>`;
+      }
+      chip.title = `Variable "${name}" = ${origDisplayVal} ${unit}`;
     }
-    chip.title = `Variable "${name}" = ${displayVal} ${unit}`;
   } else {
     // Render:  name = <editable value>
+    const displayUnit = chip.dataset.varDisplayUnit || '';
+    if (displayUnit) {
+      // Value is dimensionless but a display unit was specified — mismatch
+      chip.classList.add('error');
+      chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">${name} = ⚠ unit mismatch: value has no unit but [${displayUnit}] specified</span>`;
+      chip.title = `Unit mismatch: value is dimensionless but [${displayUnit}] was specified`;
+      return;
+    }
     try {
       const nameLatex = nameToLatex(name);
       const katexName = katex.renderToString(
