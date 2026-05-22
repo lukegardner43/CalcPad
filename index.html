@@ -311,12 +311,10 @@ body{
     break-before:always;
   }
 
-  /* iOS: @page margins are ignored by iOS so 297mm overflows the printable area.
-     Use natural content height instead — content flows to its real size and iOS
-     paginates it onto one sheet. page-break-before still handles multi-page docs. */
-  body.ios-print .a4-page{height:auto!important;max-height:none!important;overflow:visible!important}
-  body.ios-print .pg-content{height:auto!important;flex:none!important;overflow:visible!important}
-  body.ios-print .calc-area{height:auto!important;overflow:visible!important}
+  /* iOS: @page{margin:0} is ignored — system margins reduce printable height to ~273mm.
+     100vh in print media = printable page height (after system margins), so this fills
+     the paper correctly on any iOS printer without overflowing. */
+  body.ios-print .a4-page{height:100vh!important;max-height:100vh!important;overflow:hidden!important}
 
   .pg-header{padding:10mm 14mm 3mm}
   .pg-content{margin:0 14mm;height:auto;flex:1;overflow:hidden}
