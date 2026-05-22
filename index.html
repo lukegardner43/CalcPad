@@ -459,6 +459,7 @@ body{
     <div class="hpill"><code>=x^2+3</code> + Enter → formula</div>
     <div class="hpill"><code>x = 42 mm</code> → input unit</div>
     <div class="hpill"><code>= expr [mm]</code> → output unit</div>
+    <div class="hpill"><code>F_a_b</code> → F<sub>a,b</sub> subscript</div>
   </div>
 </div>
 
@@ -1140,6 +1141,8 @@ function renderVarChipContent(chip) {
       }
     }
     let exprUnitSuffix, displayValStr;
+    // Detect when unit came from literal inference (bare numbers treated in assumed unit)
+    const unitAssumed = !displayUnit && unit && !(rawExprUnit && Object.keys(rawExprUnit).length);
     if (displayUnit) {
       const dFactor = getUnitConversionFactor(parseUnitStr(displayUnit));
       displayValStr = fmtNumDisplay(dFactor !== null ? val / dFactor : val);
@@ -1149,7 +1152,7 @@ function renderVarChipContent(chip) {
       displayValStr = fmtNumDisplay(val);
     }
     try {
-      const latexExpr = toLatex(expr);
+      const latexExpr = toLatex(expr) + (unitAssumed ? '\\,{\\color{gray}[\\text{' + unit + '}]}' : '');
       const latexVal  = numToLatex(displayValStr) + exprUnitSuffix;
       const nameLatex = nameToLatex(name);
       const sub = toLatexSubstituted(expr, vars, varUnits);
@@ -2431,11 +2434,14 @@ function toggleFileMenu() { document.getElementById('fileDropdown').classList.to
 function closeFileMenu() { document.getElementById('fileDropdown').classList.remove('open'); }
 document.addEventListener('mousedown', e => { if (!e.target.closest('#fileMenuWrap')) closeFileMenu(); });
 
+const META_IDS = ['m-project','m-projno','m-date','m-desc','m-sheet','m-orig','m-deliv','m-checked','m-suit','m-rev'];
 function collectMeta() {
-  const ids = ['m-project','m-projno','m-date','m-desc','m-sheet','m-orig','m-deliv','m-checked','m-suit','m-rev'];
-  const out = {}; ids.forEach(id => { const el = document.getElementById(id); out[id] = el ? el.value : ''; }); return out;
+  const out = {}; META_IDS.forEach(id => { const el = document.getElementById(id); out[id] = el ? el.value : ''; }); return out;
 }
-function restoreMeta(meta) { Object.entries(meta).forEach(([id,val]) => { const el=document.getElementById(id); if(el)el.value=val; }); }
+function restoreMeta(meta) {
+  META_IDS.forEach(id => { const el=document.getElementById(id); if(el)el.value=''; });
+  Object.entries(meta).forEach(([id,val]) => { const el=document.getElementById(id); if(el)el.value=val; });
+}
 
 function buildSaveData() {
   const pages = [];
