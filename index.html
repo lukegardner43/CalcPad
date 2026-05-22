@@ -1209,7 +1209,10 @@ function startEditVarChip(chip) {
   valSpan.style.display = 'none';
   const inp = document.createElement('input');
   inp.type = 'text'; inp.className = 'vdc-edit-input';
-  inp.value = chip.dataset.varVal;
+  // Pre-fill with human-readable value: original typed number+unit, not the raw SI value
+  const origUnit = chip.dataset.varUnit || '';
+  const origNum = chip.dataset.varOrigNum;
+  inp.value = origNum ? (origNum + origUnit) : (chip.dataset.varExpr || fmtNum(parseFloat(chip.dataset.varVal)));
   chip.appendChild(inp);
   inp.focus(); inp.select();
   let done = false;
@@ -1220,12 +1223,23 @@ function startEditVarChip(chip) {
     if (raw) {
       const isPlain = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(raw);
       if (isPlain) {
-        chip.dataset.varVal = String(parseFloat(raw));
-        delete chip.dataset.varExpr;
-        delete chip.dataset.varUnit;
-        delete chip.dataset.varSiUnit;
-        delete chip.dataset.varOrigNum;
-        delete chip.dataset.varDisplayUnit;
+        if (origUnit) {
+          // Plain number with an existing unit — re-apply the same unit conversion
+          const conv = applyUnitConversion(parseFloat(raw), origUnit);
+          chip.dataset.varVal = String(conv ? conv.siVal : parseFloat(raw));
+          chip.dataset.varUnit = origUnit;
+          chip.dataset.varSiUnit = conv ? conv.siUnitStr : origUnit;
+          chip.dataset.varOrigNum = raw;
+          delete chip.dataset.varExpr;
+          delete chip.dataset.varDisplayUnit;
+        } else {
+          chip.dataset.varVal = String(parseFloat(raw));
+          delete chip.dataset.varExpr;
+          delete chip.dataset.varUnit;
+          delete chip.dataset.varSiUnit;
+          delete chip.dataset.varOrigNum;
+          delete chip.dataset.varDisplayUnit;
+        }
       } else {
         // Try to evaluate as formula (may reference other vars)
         let evaluated = false;
@@ -1250,7 +1264,7 @@ function startEditVarChip(chip) {
             chip.dataset.varExpr = ue.numStr;
             chip.dataset.varUnit = ue.unit;
             chip.dataset.varSiUnit = conv ? conv.siUnitStr : ue.unit;
-            delete chip.dataset.varOrigNum;
+            chip.dataset.varOrigNum = ue.numStr;
             delete chip.dataset.varDisplayUnit;
             delete chip.dataset.evalError;
           } else {
