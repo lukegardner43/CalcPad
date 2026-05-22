@@ -460,6 +460,7 @@ body{
     <div class="hpill"><code>x = 42 mm</code> → input unit</div>
     <div class="hpill"><code>= expr [mm]</code> → output unit</div>
     <div class="hpill"><code>F_a_b</code> → F<sub>a,b</sub> subscript</div>
+    <div class="hpill" title="nm um mm cm m km Mm | uN mN N kN MN GN | ug mg g kg t | Pa kPa MPa GPa | ns us ms s min hr | deg rad">Units: nm…Mm · uN…GN · ug…t · Pa…GPa · ns…hr</div>
   </div>
 </div>
 
@@ -641,7 +642,7 @@ const MATH_CONSTS = { pi: Math.PI };
 
 // Pre-process unit literals inside expressions: "4mm" → 0.004, "6kN" → 6000.
 // Longest units first so "mm" matches before "m", "min" before "m", etc.
-const _UNIT_LITERAL_RE = /(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(kPa|MPa|GPa|kN|MN|min|hr|deg|rad|ms|cm|km|kg|mm|Pa|N|m|g|s|t)\b/g;
+const _UNIT_LITERAL_RE = /(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(kPa|MPa|GPa|kN|MN|GN|mN|uN|min|hr|deg|rad|ns|us|ms|cm|km|Mm|kg|mg|ug|mm|nm|um|Pa|N|m|g|s|t)\b/g;
 function preProcessUnitLiterals(expr) {
   // Only preprocess inside complex expressions (containing operators/parens).
   // Simple "200mm" is handled by extractValueAndUnit and must not be touched here
@@ -795,25 +796,25 @@ function evalUnitExpr(formula, varUnitsMap) {
 // Conversion factors: symbol → multiply by this to get SI base unit value
 const UNIT_CONVERSIONS = {
   // Length → m
-  mm: 1e-3, cm: 1e-2, m: 1, km: 1e3,
+  nm: 1e-9, um: 1e-6, mm: 1e-3, cm: 1e-2, m: 1, km: 1e3, Mm: 1e6,
   // Force → N
-  N: 1, kN: 1e3, MN: 1e6,
+  uN: 1e-6, mN: 1e-3, N: 1, kN: 1e3, MN: 1e6, GN: 1e9,
   // Mass → kg
-  g: 1e-3, kg: 1, t: 1e3,
+  ug: 1e-9, mg: 1e-6, g: 1e-3, kg: 1, t: 1e3,
   // Pressure/Stress → Pa
   Pa: 1, kPa: 1e3, MPa: 1e6, GPa: 1e9,
   // Time → s
-  s: 1, ms: 1e-3, min: 60, hr: 3600,
+  ns: 1e-9, us: 1e-6, ms: 1e-3, s: 1, min: 60, hr: 3600,
   // Angle → rad
   deg: Math.PI / 180, rad: 1,
 };
 // Maps each symbol to its SI base unit symbol
 const UNIT_SI_BASE = {
-  mm: 'm', cm: 'm', m: 'm', km: 'm',
-  N: 'N', kN: 'N', MN: 'N',
-  g: 'kg', kg: 'kg', t: 'kg',
+  nm: 'm', um: 'm', mm: 'm', cm: 'm', m: 'm', km: 'm', Mm: 'm',
+  uN: 'N', mN: 'N', N: 'N', kN: 'N', MN: 'N', GN: 'N',
+  ug: 'kg', mg: 'kg', g: 'kg', kg: 'kg', t: 'kg',
   Pa: 'Pa', kPa: 'Pa', MPa: 'Pa', GPa: 'Pa',
-  s: 's', ms: 's', min: 's', hr: 's',
+  ns: 's', us: 's', ms: 's', s: 's', min: 's', hr: 's',
   deg: 'rad', rad: 'rad',
 };
 // Decompose derived SI units into base dimensions {kg, m, s, rad}
