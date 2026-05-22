@@ -289,10 +289,14 @@ body{
 @media print{
   @page{size:A4 portrait;margin:0}
 
+  /* Force html/body to content height — iOS Safari sets html to viewport height
+     (≈360mm on iPad) which causes a blank second page on A4 (297mm) output */
+  html{height:auto!important;overflow:hidden!important}
+
   .toolbar,.sidebar,.add-page-btn,.overflow-indicator,
   .alpha-banner,.pg-content-overflow{display:none!important;border-color:var(--bdr)!important}
 
-  body{background:#fff!important;padding:0;margin:0;display:block}
+  body{background:#fff!important;padding:0;margin:0;display:block;height:auto!important;overflow:hidden!important}
   .page-stack{margin:0;gap:0;display:block}
   .page-wrap{display:block}
 
@@ -454,7 +458,7 @@ body{
     </div>
   </div>
   <div class="sep"></div>
-  <button class="tbtn print-btn" onclick="window.print()">
+  <button class="tbtn print-btn" onclick="triggerPrint()">
     <svg viewBox="0 0 16 16" style="width:13px;height:13px"><path d="M4 1.5h8v3.5H4V1.5zm-2 4h12c.55 0 1 .45 1 1v4.5c0 .55-.45 1-1 1H13v3H3v-3H2c-.55 0-1-.45-1-1V6.5c0-.55.45-1 1-1zm1 1.5c-.41 0-.75.34-.75.75s.34.75.75.75.75-.34.75-.75S3.41 7 3 7zM5 11.5h6V14H5v-2.5z" fill="white"/></svg>
     Print
   </button>
@@ -572,8 +576,33 @@ body{
 
 <script>
 
+// ── Platform detection ──────────────────────────────────────
+// iPadOS 13+ reports as MacIntel with touch, older iPads report iPad in UA
+const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ||
+               (navigator.userAgent.includes('Mac') && 'ontouchend' in document);
 
+function triggerPrint() {
+  if (_isIOS) {
+    // iOS: skip the Chrome-specific dialog, go straight to print
+    window.print();
+  } else {
+    document.getElementById('printWarning').style.display = 'flex';
+  }
+}
 
+// Belt-and-suspenders: force html/body height to auto at print time via JS
+// (CSS @media print alone may not override viewport-height on iOS Safari)
+window.addEventListener('beforeprint', function() {
+  document.documentElement.style.cssText += ';height:auto!important;overflow:hidden!important';
+  document.body.style.cssText += ';height:auto!important;overflow:hidden!important';
+});
+window.addEventListener('afterprint', function() {
+  document.documentElement.style.height = '';
+  document.documentElement.style.overflow = '';
+  document.body.style.height = '';
+  document.body.style.overflow = '';
+});
 
 
 
