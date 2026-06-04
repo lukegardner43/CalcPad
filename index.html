@@ -224,12 +224,6 @@ body{
 .formula-chip{display:inline-flex;align-items:baseline;max-width:100%;cursor:default;user-select:none;vertical-align:middle}
 .formula-chip .katex{font-size:1em}
 .formula-chip.error{color:var(--rubine);font-style:italic}
-.var-def-chip.error{color:var(--rubine);font-style:italic}
-.var-dup-error{display:inline;color:var(--rubine);font-style:italic;font-size:11px;
-  border-bottom:1px dashed var(--rubine);cursor:default;user-select:none}
-.var-dup-error::after{content:' ⚠ already defined';font-size:10px;opacity:.8}
-.unit-shadow-warn{color:#c97b00;font-size:10px;font-style:italic;cursor:default;user-select:none;margin-left:3px}
-.unit-shadow-warn::after{content:' ⚠ shadows unit';font-size:9px;opacity:.8}
 .flhs{flex-shrink:0}
 .fseg-right{display:flex;flex-wrap:wrap;align-items:baseline;min-width:0}
 .fseg{display:inline-flex;align-items:baseline}
@@ -237,7 +231,7 @@ body{
 
 /* Table styles */
 .calc-table{width:100%;border-collapse:collapse;margin:4px 0;font-size:11px;table-layout:fixed}
-.calc-table td,.calc-table th{border:1px solid var(--bdr);padding:3px 6px;vertical-align:top;word-break:break-word;outline:none;min-width:60px;min-height:24px}
+.calc-table td,.calc-table th{border:1px solid var(--bdr);padding:3px 6px;vertical-align:top;word-break:break-word;outline:none}
 .calc-table th{background:#f0f0f0;font-weight:700;text-align:left}
 .calc-table td:focus,.calc-table th:focus{background:#fff8fe;outline:2px solid var(--rubine);outline-offset:-2px}
 .calc-table tr{break-inside:avoid;page-break-inside:avoid}
@@ -271,10 +265,6 @@ body{
 .sb{padding:6px;min-height:40px}
 .se{font-size:10px;color:var(--mid);text-align:center;padding:10px 6px;line-height:1.6}
 .se code{color:var(--purple);background:#eceaf8;padding:0 3px;border-radius:2px}
-.vs-row{display:flex;align-items:baseline;gap:4px;padding:2px 4px;border-bottom:1px solid #f0eef8;flex-wrap:wrap}
-.vs-name{color:var(--purple);flex-shrink:0}.vs-name .katex{font-size:11px}
-.vs-eq{color:var(--mid);font-size:11px;flex-shrink:0}
-.vs-val{color:#333;font-size:11px;min-width:0;word-break:break-all}
 .sr{display:flex;align-items:center;padding:3px 6px;border-bottom:1px solid #eee;font-style:italic}
 .sn{font-size:10px;color:var(--dark);flex:1}.sq{font-size:10px;color:var(--mid);margin:0 3px}.sv{font-size:10px;color:var(--dark);white-space:nowrap}
 .sref{border-top:1px solid #ddd;padding:8px 10px 10px}
@@ -289,29 +279,20 @@ body{
 @media print{
   @page{size:A4 portrait;margin:0}
 
-  /* html/body must be auto-height — iOS Safari can set html to full viewport
-     height (≈360mm) which makes the print renderer generate a second blank page */
-  html{height:auto!important}
-  body{background:#fff!important;padding:0;margin:0;display:block;height:auto!important}
-
   .toolbar,.sidebar,.add-page-btn,.overflow-indicator,
-  .alpha-banner,.pg-content-overflow{display:none!important;border-color:var(--bdr)!important}
+  .pg-content-overflow{display:none!important;border-color:var(--bdr)!important}
 
+  body{background:#fff!important;padding:0;margin:0;display:block}
   .page-stack{margin:0;gap:0;display:block}
   .page-wrap{display:block}
 
-  /* Desktop: fixed A4 height, content clipped at page boundary.
-     287mm (not full 297mm) leaves ~10mm buffer for iOS AirPrint system margins
-     so the footer doesn't overflow onto a second page. */
   .a4-page{
-    width:210mm;height:287mm;max-height:287mm;
+    width:210mm;min-height:297mm;
     box-shadow:none;
-    overflow:hidden;
+    page-break-after:always;
+    overflow:visible;
   }
-  .page-wrap + .page-wrap .a4-page{
-    page-break-before:always;
-    break-before:always;
-  }
+  .a4-page:last-of-type{page-break-after:avoid}
 
   .pg-header{padding:10mm 14mm 3mm}
   .pg-content{margin:0 14mm;height:auto;flex:1;overflow:hidden}
@@ -461,7 +442,7 @@ body{
     </div>
   </div>
   <div class="sep"></div>
-  <button class="tbtn print-btn" onclick="triggerPrint()">
+  <button class="tbtn print-btn" onclick="window.print()">
     <svg viewBox="0 0 16 16" style="width:13px;height:13px"><path d="M4 1.5h8v3.5H4V1.5zm-2 4h12c.55 0 1 .45 1 1v4.5c0 .55-.45 1-1 1H13v3H3v-3H2c-.55 0-1-.45-1-1V6.5c0-.55.45-1 1-1zm1 1.5c-.41 0-.75.34-.75.75s.34.75.75.75.75-.34.75-.75S3.41 7 3 7zM5 11.5h6V14H5v-2.5z" fill="white"/></svg>
     Print
   </button>
@@ -470,8 +451,6 @@ body{
     <div class="hpill"><code>=x^2+3</code> + Enter → formula</div>
     <div class="hpill"><code>x = 42 mm</code> → input unit</div>
     <div class="hpill"><code>= expr [mm]</code> → output unit</div>
-    <div class="hpill"><code>F_a_b</code> → F<sub>a,b</sub> subscript</div>
-    <div class="hpill" title="nm um mm cm m km Mm | uN mN N kN MN GN | ug mg g kg t | Pa kPa MPa GPa | ns us ms s min hr | deg rad">Units: nm…Mm · uN…GN · ug…t · Pa…GPa · ns…hr</div>
   </div>
 </div>
 
@@ -529,7 +508,7 @@ body{
         <div id="editor" class="calc-area" contenteditable="true" spellcheck="true"
           data-placeholder="Begin calculations… type x = 42 then Enter to define a variable, =x^2+3 then Enter for a formula."></div>
       </div>
-      <div class="pg-footer">Alpha — updated 22.05.26</div>
+      <div class="pg-footer">Alpha — updated 27.04.26</div>
     </div>
 
     <!-- Sidebar (only shown next to page 1) -->
@@ -579,31 +558,8 @@ body{
 
 <script>
 
-// ── Platform detection ──────────────────────────────────────
-// iPadOS 13+ reports as MacIntel with touch, older iPads report iPad in UA
-const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ||
-               (navigator.userAgent.includes('Mac') && 'ontouchend' in document);
 
-function triggerPrint() {
-  if (_isIOS) {
-    // iOS: skip the Chrome-specific dialog, go straight to print
-    window.print();
-  } else {
-    document.getElementById('printWarning').style.display = 'flex';
-  }
-}
 
-// iOS Safari sets html to full viewport height (>297mm on iPad) at print time,
-// generating a blank second page. Force auto-height so html/body wrap to content only.
-window.addEventListener('beforeprint', function() {
-  document.documentElement.style.height = 'auto';
-  document.body.style.height = 'auto';
-});
-window.addEventListener('afterprint', function() {
-  document.documentElement.style.height = '';
-  document.body.style.height = '';
-});
 
 
 
@@ -638,13 +594,10 @@ function renderSidebar() {
         }
       }
     }
-    let nameHtml;
-    try { nameHtml = katex.renderToString(nameToLatex(name), {displayMode:false, throwOnError:false, output:'html'}); }
-    catch(e) { nameHtml = name; }
     const row = document.createElement('div');
     row.className = 'vs-row';
     row.innerHTML =
-      `<span class="vs-name">${nameHtml}</span>` +
+      `<span class="vs-name">${name}</span>` +
       `<span class="vs-eq">=</span>` +
       `<span class="vs-val">${dispVal}${unit ? ' ' + unit : ''}</span>`;
     list.appendChild(row);
@@ -674,32 +627,6 @@ const FUNS = {
 
 const MATH_CONSTS = { pi: Math.PI };
 
-// Pre-process unit literals inside expressions: "4mm" → 0.004, "6kN" → 6000.
-// Longest units first so "mm" matches before "m", "min" before "m", etc.
-const _UNIT_LITERAL_RE = /(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(kPa|MPa|GPa|kN|MN|GN|mN|uN|min|hr|deg|rad|ns|us|ms|cm|km|Mm|kg|mg|ug|mm|nm|um|Pa|N|m|g|s|t)\b/g;
-function preProcessUnitLiterals(expr) {
-  // Only preprocess inside complex expressions (containing operators/parens).
-  // Simple "200mm" is handled by extractValueAndUnit and must not be touched here
-  // or the unit information is lost.
-  if (!/[+\-*/()\^,]/.test(expr)) return expr;
-  return expr.replace(new RegExp(_UNIT_LITERAL_RE.source, 'g'), (_, num, unit) => {
-    const f = UNIT_CONVERSIONS[unit];
-    return f !== undefined ? String(parseFloat(num) * f) : _;
-  });
-}
-
-// When evalUnitExpr can't determine the unit (e.g. SUM with literal values),
-// fall back to checking whether all unit literals in the expression share the
-// same SI base dimension.  Returns the base symbol ('m', 'N', …) or null.
-function inferUnitFromExprLiterals(expr) {
-  const matches = [...expr.matchAll(new RegExp(_UNIT_LITERAL_RE.source, 'g'))];
-  if (!matches.length) return null;
-  const bases = matches.map(m => UNIT_SI_BASE[m[2]]).filter(Boolean);
-  if (!bases.length) return null;
-  if (!bases.every(b => b === bases[0])) return null; // mixed dimensions
-  return bases[0];
-}
-
 function evalFormula(raw, variables) {
   // Built-in constants are available unless the user has defined a variable with the same name
   const variables_ = { ...MATH_CONSTS, ...variables };
@@ -714,13 +641,9 @@ function evalFormula(raw, variables) {
     return FUNS[up] ? up + m.slice(name.length) : m;
   });
   expr = expr.replace(/\^/g, '**');
-  expr = preProcessUnitLiterals(expr);
   const vnames = Object.keys(variables_).sort((a,b) => b.length - a.length);
   for (const vn of vnames)
     expr = expr.replace(new RegExp(`\\b${vn}\\b`, 'g'), `(${variables_[vn]})`);
-  // Detect 0**0 after substitution — result would be 1 but mathematically indeterminate
-  if (/\(0\)\s*\*\*\s*\(0\)/.test(expr) || /(?<![*])\b0\s*\*\*\s*0\b(?![*])/.test(expr))
-    throw new Error('0^0 is indeterminate');
   let safe = expr.replace(/\b([A-Z_]+)\s*\(/g, (_,nm) => {
     if (FUNS[nm]) return `__F.${nm}(`;
     throw new Error(`Unknown: ${nm}`);
@@ -812,8 +735,7 @@ function unitObjToLatex(u) {
 }
 // Evaluate the result unit of a formula given variable unit strings.
 function evalUnitExpr(formula, varUnitsMap) {
-  if (!varUnitsMap) return {};
-  varUnitsMap = varUnitsMap || {};
+  if (!varUnitsMap||!Object.keys(varUnitsMap).length) return {};
   const toks = tokenize(formula.replace(/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*(?=\()/g,(m,n)=>n.toUpperCase()+m.slice(n.length)));
   let pos=0;
   const peek=()=>toks[pos], consume=()=>toks[pos++], eat=t=>{if(peek().t===t){consume();return true;}return false;};
@@ -822,7 +744,7 @@ function evalUnitExpr(formula, varUnitsMap) {
   function parseTerm(){let l=parseUnary();while(peek().t==='*'||peek().t==='/'){const op=consume().t;const r=parseUnary();l=op==='*'?unitMul(l,r):unitDiv(l,r);}return l;}
   function parseUnary(){if(peek().t==='-'||peek().t==='+'){consume();return parseUnary();}return parsePower();}
   function parsePower(){const base=parsePrimary();if(peek().t==='^'){consume();let sign=1;if(peek().t==='-'){consume();sign=-1;}else if(peek().t==='+')consume();if(peek().t==='num'){const n=parseFloat(consume().v)*sign;return unitPow(base,n);}parseUnary();return null;}return base;}
-  function parsePrimary(){const tok=peek();if(tok.t==='('){consume();const r=parseExpr();eat(')');return r;}if(tok.t==='num'){consume();if(peek().t==='id'&&Object.prototype.hasOwnProperty.call(UNIT_CONVERSIONS,peek().v)){const u=consume().v;return parseUnitStr(UNIT_SI_BASE[u]||u);}return{};}if(tok.t==='id'){consume();if(peek().t==='('){consume();let d=1;while(d>0&&peek().t!=='EOF'){const t=consume();if(t.t==='(')d++;else if(t.t===')')d--;}return null;}const u=varUnitsMap[tok.v];return u?parseUnitStr(u):{};}consume();return null;}
+  function parsePrimary(){const tok=peek();if(tok.t==='('){consume();const r=parseExpr();eat(')');return r;}if(tok.t==='num'){consume();if(peek().t==='id'&&Object.prototype.hasOwnProperty.call(UNIT_CONVERSIONS,peek().v)){const u=consume().v;return parseUnitStr(UNIT_SI_BASE[u]||u);}return{};}if(tok.t==='id'){consume();if(peek().t==='('){consume();let d=1;while(d>0&&peek().t!=='EOF'){const t=consume();if(t.t==='(')d++;else if(t.t===')')d--;}return null;}const u=varUnitsMap[tok.v];if(u)return parseUnitStr(u);if(Object.prototype.hasOwnProperty.call(vars,tok.v))return null;return{};}consume();return null;}
   try{return parseExpr();}catch(e){return null;}
 }
 
@@ -830,51 +752,35 @@ function evalUnitExpr(formula, varUnitsMap) {
 // Conversion factors: symbol → multiply by this to get SI base unit value
 const UNIT_CONVERSIONS = {
   // Length → m
-  nm: 1e-9, um: 1e-6, mm: 1e-3, cm: 1e-2, m: 1, km: 1e3, Mm: 1e6,
+  mm: 1e-3, cm: 1e-2, m: 1, km: 1e3,
   // Force → N
-  uN: 1e-6, mN: 1e-3, N: 1, kN: 1e3, MN: 1e6, GN: 1e9,
+  N: 1, kN: 1e3, MN: 1e6,
   // Mass → kg
-  ug: 1e-9, mg: 1e-6, g: 1e-3, kg: 1, t: 1e3,
+  g: 1e-3, kg: 1, t: 1e3,
   // Pressure/Stress → Pa
   Pa: 1, kPa: 1e3, MPa: 1e6, GPa: 1e9,
   // Time → s
-  ns: 1e-9, us: 1e-6, ms: 1e-3, s: 1, min: 60, hr: 3600,
+  s: 1, ms: 1e-3, min: 60, hr: 3600,
   // Angle → rad
   deg: Math.PI / 180, rad: 1,
 };
 // Maps each symbol to its SI base unit symbol
 const UNIT_SI_BASE = {
-  nm: 'm', um: 'm', mm: 'm', cm: 'm', m: 'm', km: 'm', Mm: 'm',
-  uN: 'N', mN: 'N', N: 'N', kN: 'N', MN: 'N', GN: 'N',
-  ug: 'kg', mg: 'kg', g: 'kg', kg: 'kg', t: 'kg',
+  mm: 'm', cm: 'm', m: 'm', km: 'm',
+  N: 'N', kN: 'N', MN: 'N',
+  g: 'kg', kg: 'kg', t: 'kg',
   Pa: 'Pa', kPa: 'Pa', MPa: 'Pa', GPa: 'Pa',
-  ns: 's', us: 's', ms: 's', s: 's', min: 's', hr: 's',
+  s: 's', ms: 's', min: 's', hr: 's',
   deg: 'rad', rad: 'rad',
 };
-// Decompose derived SI units into base dimensions {kg, m, s, rad}
-const UNIT_SI_DECOMP = {
-  N:  { kg: 1, m: 1, s: -2 },
-  Pa: { kg: 1, m: -1, s: -2 },
-  J:  { kg: 1, m: 2, s: -2 },
-  W:  { kg: 1, m: 2, s: -3 },
-  Hz: { s: -1 },
-};
-// Convert a unit-object to SI base dimensions, expanding derived units (N→kg·m/s², etc.)
+// Convert a unit-object to SI base symbols, e.g. {mm:4} → {m:4}, {kN:1,mm:-2} → {N:1,m:-2}
 function unitObjToSIBase(u) {
   if (!u) return {};
   const r = {};
   for (const [sym, exp] of Object.entries(u)) {
-    const norm = UNIT_SI_BASE[sym] || sym;  // kN→N, MPa→Pa, etc.
-    const decomp = UNIT_SI_DECOMP[norm];
-    if (decomp) {
-      for (const [base, e] of Object.entries(decomp)) {
-        r[base] = (r[base] || 0) + e * exp;
-        if (!r[base]) delete r[base];
-      }
-    } else {
-      r[norm] = (r[norm] || 0) + exp;
-      if (!r[norm]) delete r[norm];
-    }
+    const base = UNIT_SI_BASE[sym] || sym;
+    r[base] = (r[base] || 0) + exp;
+    if (!r[base]) delete r[base];
   }
   return r;
 }
@@ -978,17 +884,12 @@ function nameToLatex(name) {
   }
 
   if (!sub) return baseLatex;
-  // Multi-part subscripts: F_a_b → F_{a,b}. Each part rendered flat (no nesting).
-  const subLatex = sub.split('_').map(p => {
-    if (/^\d+$/.test(p)) return p;
-    const gCmd = GREEK[p.toLowerCase()];
-    if (gCmd) { const up = /^[A-Z]/.test(p); return '\\' + (up ? gCmd[0].toUpperCase()+gCmd.slice(1) : gCmd); }
-    return p.length === 1 ? p : '\\text{' + p + '}';
-  }).join(',');
+  // Numeric-only subscripts render as plain digits; others recurse
+  const subLatex = /^\d+$/.test(sub) ? sub : nameToLatex(sub);
   return baseLatex + '_{' + subLatex + '}';
 }
 
-function toLatex(rawFormula, subsMap, assumedUnit) {
+function toLatex(rawFormula, subsMap) {
   let formula = rawFormula;
   // Normalise function names to uppercase before tokenising
   formula = formula.replace(/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*(?=\()/g, (m, name) => {
@@ -1044,10 +945,10 @@ function toLatex(rawFormula, subsMap, assumedUnit) {
   }
 
   function parseTerm() {
-    let left = parseUnary();
+    let left = parsePower();
     while (peek().t === '*' || peek().t === '/') {
       const op = consume().t;
-      const right = parseUnary();
+      const right = parsePower();
       if (op === '/') {
         left = '\\dfrac{' + stripParens(left) + '}{' + stripParens(right) + '}';
       } else {
@@ -1057,23 +958,20 @@ function toLatex(rawFormula, subsMap, assumedUnit) {
     return left;
   }
 
-  // parseUnary has lower precedence than ^ so -a^2 renders as -(a^2) not (-a)^2
-  function parseUnary() {
-    if (peek().t === '-') { consume(); return '-' + parseUnary(); }
-    if (peek().t === '+') { consume(); return parseUnary(); }
-    return parsePower();
-  }
-
-  // parsePower uses parsePrimary for the base and parseUnary for the exponent,
-  // giving right-associativity: 2^2^2 = 2^(2^2) = 2^{2^{2}}
   function parsePower() {
-    const base = parsePrimary();
+    let base = parseUnary();
     if (peek().t === '^') {
       consume();
       const exp = parseUnary();
       return '{' + base + '}^{' + stripParens(exp) + '}';
     }
     return base;
+  }
+
+  function parseUnary() {
+    if (peek().t === '-') { consume(); return '-' + parsePrimary(); }
+    if (peek().t === '+') { consume(); return parsePrimary(); }
+    return parsePrimary();
   }
 
   function parsePrimary() {
@@ -1084,15 +982,7 @@ function toLatex(rawFormula, subsMap, assumedUnit) {
       eat(')');
       return '\\left(' + inner + '\\right)';
     }
-    if (tok.t === 'num') {
-      consume();
-      // Implicit unit literal: "2mm", "3kN" — num immediately followed by a unit identifier
-      if (peek().t === 'id' && Object.prototype.hasOwnProperty.call(UNIT_CONVERSIONS, peek().v)) {
-        const unitTok = consume();
-        return numToLatex(tok.v) + unitToLatex(unitTok.v);
-      }
-      return numToLatex(tok.v) + (assumedUnit ? unitToLatex(assumedUnit) : '');
-    }
+    if (tok.t === 'num') { consume(); return tok.v; }
     if (tok.t === 'id') {
       consume();
       if (peek().t === '(') {
@@ -1155,42 +1045,22 @@ function renderVarChipContent(chip) {
   const expr  = chip.dataset.varExpr;
   const unit  = chip.dataset.varUnit || '';
 
-  // Show error state (e.g. self-reference, undefined variable)
-  if (chip.dataset.evalError) {
-    chip.classList.add('error');
-    chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">${name} = ⚠ ${chip.dataset.evalError}</span>`;
-    chip.title = chip.dataset.evalError;
-    return;
-  }
-  chip.classList.remove('error');
-
   let inner = '';
 
   if (expr) {
     // Render:  name = <LaTeX expression> [ = substituted ] = value [unit]
     const displayUnit = chip.dataset.varDisplayUnit || '';
-    const rawExprUnit = evalUnitExpr(expr, varUnits);
-    const exprUnit = rawExprUnit && Object.keys(rawExprUnit).length ? unitObjToSIBase(rawExprUnit) : rawExprUnit;
-    // Check for unit mismatch in top-level addition/subtraction
-    if (!displayUnit && rawExprUnit === null && hasTopLevelAddSub(expr)) {
-      chip.classList.add('error');
-      chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">${name} = ⚠ unit mismatch</span>`;
-      chip.title = 'Expression adds/subtracts quantities with incompatible units';
-      return;
-    }
+    const exprUnit = evalUnitExpr(expr, varUnits);
     // Check for unit dimension mismatch when a display unit is specified
     if (displayUnit && exprUnit && Object.keys(exprUnit).length) {
       const specBase = unitObjToSIBase(parseUnitStr(displayUnit));
       if (Object.keys(specBase).length && !unitObjEq(exprUnit, specBase)) {
-        const exprUnitStr = unitObjToStr(exprUnit);
-        chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">${name}: unit mismatch [${displayUnit}] vs [${exprUnitStr}]</span>`;
-        chip.title = `Unit mismatch: formula gives [${exprUnitStr}] but [${displayUnit}] was specified`;
+        chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">${name}: unit mismatch [${displayUnit}] vs [${unitObjToStr(exprUnit)}]</span>`;
+        chip.title = `Unit mismatch: formula gives [${unitObjToStr(exprUnit)}] but [${displayUnit}] was specified`;
         return;
       }
     }
     let exprUnitSuffix, displayValStr;
-    // Detect when unit came from literal inference (bare numbers treated in assumed unit)
-    const unitAssumed = !displayUnit && unit && !(rawExprUnit && Object.keys(rawExprUnit).length);
     if (displayUnit) {
       const dFactor = getUnitConversionFactor(parseUnitStr(displayUnit));
       displayValStr = fmtNumDisplay(dFactor !== null ? val / dFactor : val);
@@ -1200,7 +1070,7 @@ function renderVarChipContent(chip) {
       displayValStr = fmtNumDisplay(val);
     }
     try {
-      const latexExpr = toLatex(expr, null, unitAssumed ? unit : null);
+      const latexExpr = toLatex(expr);
       const latexVal  = numToLatex(displayValStr) + exprUnitSuffix;
       const nameLatex = nameToLatex(name);
       const sub = toLatexSubstituted(expr, vars, varUnits);
@@ -1218,55 +1088,22 @@ function renderVarChipContent(chip) {
     chip.innerHTML = inner;
     chip.title = `${name} = ${expr} = ${displayValStr}${displayUnit ? ' ' + displayUnit : (unit ? ' ' + unit : '')}`;
   } else if (unit) {
-    // Render:  name = origValue inputUnit [= convertedValue outputUnit]
-    const origDisplayVal = chip.dataset.varOrigNum || fmtNum(val);
-    const displayUnit = chip.dataset.varDisplayUnit || '';
-    if (displayUnit) {
-      // Validate dimension compatibility between input unit and output unit
-      const inDim  = unitObjToSIBase(parseUnitStr(unit));
-      const outDim = unitObjToSIBase(parseUnitStr(displayUnit));
-      if (Object.keys(outDim).length && !unitObjEq(inDim, outDim)) {
-        chip.classList.add('error');
-        chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">${name}: unit mismatch [${unit}] vs [${displayUnit}]</span>`;
-        chip.title = `Unit mismatch: value is in [${unit}] but [${displayUnit}] was specified`;
-        return;
-      }
-      // Show input value and converted output value
-      const dFactor = getUnitConversionFactor(parseUnitStr(displayUnit));
-      const outVal = fmtNumDisplay(dFactor !== null ? val / dFactor : val);
-      try {
-        const kx = s => katex.renderToString(s, {displayMode:false, throwOnError:false, output:'html'});
-        const katexHtml = kx(nameToLatex(name) + ' = ' + numToLatex(origDisplayVal) + unitToLatex(unit)
-          + ' = ' + numToLatex(outVal) + unitToLatex(displayUnit));
-        chip.innerHTML = `<span class="vdc-name">${katexHtml}</span>`;
-      } catch(e) {
-        chip.innerHTML = `<span class="vdc-name">${name} = ${origDisplayVal} ${unit} = ${outVal} ${displayUnit}</span>`;
-      }
-      chip.title = `Variable "${name}" = ${origDisplayVal} ${unit} = ${outVal} ${displayUnit}`;
-    } else {
-      try {
-        const nameLatex = nameToLatex(name);
-        const valLatex  = numToLatex(origDisplayVal) + unitToLatex(unit);
-        const katexHtml = katex.renderToString(
-          nameLatex + ' = ' + valLatex,
-          { displayMode: false, throwOnError: false, output: 'html' }
-        );
-        chip.innerHTML = `<span class="vdc-name">${katexHtml}</span>`;
-      } catch(e) {
-        chip.innerHTML = `<span class="vdc-name">${name} = </span><span class="vdc-val">${origDisplayVal} ${unit}</span>`;
-      }
-      chip.title = `Variable "${name}" = ${origDisplayVal} ${unit}`;
+    // Render:  name = origValue unit  (show the value the user typed, not the SI-converted internal value)
+    const displayVal = chip.dataset.varOrigNum || fmtNum(val);
+    try {
+      const nameLatex = nameToLatex(name);
+      const valLatex  = numToLatex(displayVal) + unitToLatex(unit);
+      const katexHtml = katex.renderToString(
+        nameLatex + ' = ' + valLatex,
+        { displayMode: false, throwOnError: false, output: 'html' }
+      );
+      chip.innerHTML = `<span class="vdc-name">${katexHtml}</span>`;
+    } catch(e) {
+      chip.innerHTML = `<span class="vdc-name">${name} = </span><span class="vdc-val">${displayVal} ${unit}</span>`;
     }
+    chip.title = `Variable "${name}" = ${displayVal} ${unit}`;
   } else {
     // Render:  name = <editable value>
-    const displayUnit = chip.dataset.varDisplayUnit || '';
-    if (displayUnit) {
-      // Value is dimensionless but a display unit was specified — mismatch
-      chip.classList.add('error');
-      chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">${name} = ⚠ unit mismatch: value has no unit but [${displayUnit}] specified</span>`;
-      chip.title = `Unit mismatch: value is dimensionless but [${displayUnit}] was specified`;
-      return;
-    }
     try {
       const nameLatex = nameToLatex(name);
       const katexName = katex.renderToString(
@@ -1283,14 +1120,6 @@ function renderVarChipContent(chip) {
     }
     chip.title = `Variable "${name}" = ${fmtNum(val)} — click value to edit`;
     chip.querySelector('.vdc-val').addEventListener('click', () => startEditVarChip(chip));
-  }
-  // Warn if the variable name shadows a known unit symbol
-  if (Object.prototype.hasOwnProperty.call(UNIT_CONVERSIONS, name)) {
-    const warn = document.createElement('span');
-    warn.className = 'unit-shadow-warn';
-    warn.title = `"${name}" is a recognised unit symbol — expressions like "5${name}" will use this variable, not the ${name} unit`;
-    chip.appendChild(warn);
-    chip.title += `\n⚠ "${name}" shadows the ${name} unit`;
   }
 }
 
@@ -1322,90 +1151,23 @@ function startEditVarChip(chip) {
   valSpan.style.display = 'none';
   const inp = document.createElement('input');
   inp.type = 'text'; inp.className = 'vdc-edit-input';
-  // Pre-fill with human-readable value: original typed number+unit, not the raw SI value
-  const origUnit = chip.dataset.varUnit || '';
-  const origNum = chip.dataset.varOrigNum;
-  inp.value = origNum ? (origNum + origUnit) : (chip.dataset.varExpr || fmtNum(parseFloat(chip.dataset.varVal)));
+  inp.value = chip.dataset.varVal;
   chip.appendChild(inp);
   inp.focus(); inp.select();
-  let done = false;
   function commit() {
-    if (done) return;
-    done = true;
-    const raw = inp.value.trim();
-    if (raw) {
-      const isPlain = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(raw);
-      if (isPlain) {
-        if (origUnit) {
-          // Plain number with an existing unit — re-apply the same unit conversion
-          const conv = applyUnitConversion(parseFloat(raw), origUnit);
-          chip.dataset.varVal = String(conv ? conv.siVal : parseFloat(raw));
-          chip.dataset.varUnit = origUnit;
-          chip.dataset.varSiUnit = conv ? conv.siUnitStr : origUnit;
-          chip.dataset.varOrigNum = raw;
-          delete chip.dataset.varExpr;
-          delete chip.dataset.varDisplayUnit;
-        } else {
-          chip.dataset.varVal = String(parseFloat(raw));
-          delete chip.dataset.varExpr;
-          delete chip.dataset.varUnit;
-          delete chip.dataset.varSiUnit;
-          delete chip.dataset.varOrigNum;
-          delete chip.dataset.varDisplayUnit;
-        }
-      } else {
-        // Try to evaluate as formula (may reference other vars)
-        let evaluated = false;
-        const evalVars = {...vars}; delete evalVars[chip.dataset.varName];
-        try {
-          const v = parseFloat(evalFormula(raw, evalVars).replace(/,/g, ''));
-          if (!isNaN(v)) {
-            chip.dataset.varExpr = raw;
-            delete chip.dataset.varUnit;
-            delete chip.dataset.varSiUnit;
-            delete chip.dataset.varOrigNum;
-            delete chip.dataset.varDisplayUnit;
-            evaluated = true;
-          }
-        } catch(e) { /* fall through */ }
-        if (!evaluated) {
-          // Try unit literal like 10kN
-          const ue = extractValueAndUnit(raw);
-          if (ue) {
-            const conv = applyUnitConversion(ue.val, ue.unit);
-            chip.dataset.varVal = String(conv ? conv.siVal : ue.val);
-            chip.dataset.varExpr = ue.numStr;
-            chip.dataset.varUnit = ue.unit;
-            chip.dataset.varSiUnit = conv ? conv.siUnitStr : ue.unit;
-            chip.dataset.varOrigNum = ue.numStr;
-            delete chip.dataset.varDisplayUnit;
-            delete chip.dataset.evalError;
-          } else {
-            // Store as formula and let rebuildVars handle/error
-            chip.dataset.varExpr = raw;
-            delete chip.dataset.varUnit;
-            delete chip.dataset.varSiUnit;
-            delete chip.dataset.varOrigNum;
-            delete chip.dataset.varDisplayUnit;
-          }
-        }
-      }
+    const newVal = parseFloat(inp.value);
+    if (!isNaN(newVal)) {
+      chip.dataset.varVal = newVal;
+      valSpan.textContent = fmtNum(newVal);
     }
     valSpan.style.display = '';
     chip.classList.remove('editing-val');
     inp.remove();
     rebuildVars();
   }
-  function cancel() {
-    if (done) return;
-    done = true;
-    valSpan.style.display = '';
-    chip.classList.remove('editing-val');
-    inp.remove();
-  }
   inp.addEventListener('keydown', e => {
     if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); commit(); }
-    if (e.key === 'Escape') cancel();
+    if (e.key === 'Escape') { valSpan.style.display = ''; chip.classList.remove('editing-val'); inp.remove(); }
     e.stopPropagation();
   });
   inp.addEventListener('blur', commit);
@@ -1474,18 +1236,16 @@ function setFormulaContent(chip, formula, result, isError) {
     const sub = toLatexSubstituted(formula, vars, varUnits);
     // Use full-precision float from result string so 2dp rounding doesn't corrupt unit conversion
     const rawSI = parseFloat(result.replace(/,/g, ''));
-    const rawResUnit = evalUnitExpr(formula, varUnits);
-    const resUnit = rawResUnit && Object.keys(rawResUnit).length ? unitObjToSIBase(rawResUnit) : rawResUnit;
+    const resUnit = evalUnitExpr(formula, varUnits);
     let displayVal, unitSuffix = '';
     if (outputUnit) {
       // Check that the specified unit is dimensionally compatible with the formula result
       if (resUnit && Object.keys(resUnit).length) {
         const specBase = unitObjToSIBase(parseUnitStr(outputUnit));
         if (Object.keys(specBase).length && !unitObjEq(resUnit, specBase)) {
-          const resUnitStr = unitObjToStr(resUnit);
-          chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">unit mismatch: result is [${resUnitStr}] not [${outputUnit}]</span>`;
+          chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">unit mismatch: result is [${unitObjToStr(resUnit)}] not [${outputUnit}]</span>`;
           chip.className = 'formula-chip error';
-          chip.title = `Unit mismatch: formula gives [${resUnitStr}] but [${outputUnit}] was specified`;
+          chip.title = `Unit mismatch: formula gives [${unitObjToStr(resUnit)}] but [${outputUnit}] was specified`;
           return;
         }
       }
@@ -1717,7 +1477,7 @@ function addPage() {
   // Footer
   const ftr = document.createElement('div');
   ftr.className = 'pg-footer';
-  ftr.textContent = 'Alpha — updated 22.05.26';
+  ftr.textContent = 'Alpha — updated 27.04.26';
   page.appendChild(ftr);
 
   wrap.appendChild(page);
@@ -1919,18 +1679,6 @@ function getAllEditors() {
   return Array.from(document.querySelectorAll('.calc-area'));
 }
 
-// Returns true if expr has a + or - operator at paren-depth 0 (i.e. a top-level addition/subtraction)
-function hasTopLevelAddSub(expr) {
-  let depth = 0;
-  for (let i = 0; i < expr.length; i++) {
-    const c = expr[i];
-    if (c === '(' || c === '[') depth++;
-    else if (c === ')' || c === ']') depth--;
-    else if (depth === 0 && i > 0 && (c === '+' || c === '-')) return true;
-  }
-  return false;
-}
-
 // Override rebuildVars to scan all editors in document order (vars then formulas interleaved)
 function rebuildVars() {
   vars = {};
@@ -1947,30 +1695,13 @@ function rebuildVars() {
           try {
             const v = parseFloat(evalFormula(expr, vars).replace(/,/g, ''));
             if (!isNaN(v)) {
-              if (unit) { varUnits[name] = siUnit; }
-              else {
-                const inf = evalUnitExpr(expr, varUnits);
-                if (inf && Object.keys(inf).length) {
-                  varUnits[name] = unitObjToStr(unitObjToSIBase(inf));
-                } else if (inf === null && hasTopLevelAddSub(expr)) {
-                  // Unit mismatch: top-level addition between incompatible dimensions
-                  chip.dataset.evalError = 'unit mismatch';
-                  chip.dataset.varVal = String(v);
-                  vars[name] = v; // keep numeric for any dependent formulas
-                  renderVarChipContent(chip);
-                  return;
-                } else {
-                  const lit = inferUnitFromExprLiterals(expr); if (lit) varUnits[name] = lit;
-                }
-              }
-              delete chip.dataset.evalError;
               chip.dataset.varVal = String(v);
               vars[name] = v;
+              if (unit) { varUnits[name] = siUnit; }
+              else { const inf = evalUnitExpr(expr, varUnits); if (inf && Object.keys(inf).length) varUnits[name] = unitObjToStr(inf); }
               renderVarChipContent(chip);
             }
           } catch(e) {
-            chip.dataset.evalError = e.message || 'Error';
-            renderVarChipContent(chip);
             const fallback = parseFloat(chip.dataset.varVal);
             if (!isNaN(fallback)) { vars[name] = fallback; if (unit) varUnits[name] = siUnit; }
           }
@@ -2036,32 +1767,15 @@ document.addEventListener('keydown', e => {
       if (dispUnitMatch && dispUnitMatch[1].trim()) { exprStr = dispUnitMatch[1].trim(); dispUnit = dispUnitMatch[2].trim(); }
       let val, unit = '', siUnit = '';
       try {
-        const evalVars = {...vars}; delete evalVars[varName];
-        val = parseFloat(evalFormula(exprStr, evalVars).replace(/,/g, ''));
+        val = parseFloat(evalFormula(exprStr, vars).replace(/,/g, ''));
         if (isNaN(val)) throw new Error('NaN');
         if (!unit) {
           const inferred = evalUnitExpr(exprStr, varUnits);
-          if (inferred && Object.keys(inferred).length) { siUnit = unit = unitObjToStr(unitObjToSIBase(inferred)); }
-          else { const lit = inferUnitFromExprLiterals(exprStr); if (lit) { siUnit = unit = lit; } }
+          if (inferred && Object.keys(inferred).length) { siUnit = unit = unitObjToStr(inferred); }
         }
       } catch(err) {
         const ue = extractValueAndUnit(exprStr);
-        if (!ue) {
-          // Expression can't be evaluated (e.g. self-reference) — commit as error chip
-          e.preventDefault();
-          const errChip = makeVarDefChip(varName, NaN, exprStr, '', '', dispUnit);
-          errChip.dataset.evalError = err.message || 'cannot evaluate';
-          renderVarChipContent(errChip);
-          const parent = node.parentNode;
-          const frag = document.createDocumentFragment();
-          if (prefix) frag.appendChild(document.createTextNode(prefix));
-          frag.appendChild(errChip);
-          const spacer = document.createTextNode(' ');
-          frag.appendChild(spacer);
-          parent.replaceChild(frag, node);
-          rebuildVars();
-          return;
-        }
+        if (!ue) return;
         const origNumStr = ue.numStr;
         unit = ue.unit; exprStr = origNumStr;
         const conv = applyUnitConversion(ue.val, unit);
@@ -2070,12 +1784,8 @@ document.addEventListener('keydown', e => {
       }
       const existing = document.querySelector(`.var-def-chip[data-var-name="${CSS.escape(varName)}"]`);
       if (existing) {
-        e.preventDefault();
-        const errSpan = document.createElement('span');
-        errSpan.className = 'var-dup-error';
-        errSpan.contentEditable = 'false';
-        errSpan.textContent = node.textContent.trim();
-        node.replaceWith(errSpan);
+        node.style.color = 'var(--rubine)';
+        setTimeout(() => { node.style.color = ''; }, 1200);
         return;
       }
       e.preventDefault();
@@ -2110,8 +1820,8 @@ document.addEventListener('input', e => {
     const text = node.textContent;
     const pos = range.startOffset;
     if (text[pos - 1] === '=') {
-      const before = text[pos - 2];
-      if (pos <= 1 || /[\s\u00A0\n]/.test(before) || /[a-zA-Z0-9_]/.test(before))
+      let before = text[pos - 2];
+      if (pos <= 1 || before === ' ' || before === '\n' || before === '\u00A0')
         formulaBuffer = '';
     }
   }
@@ -2142,13 +1852,7 @@ function commitFormula(ed) {
     const varName = varEndMatch[2];
     const prefix  = varEndMatch[1] || '';
     let varVal, varUnit = '', varSiUnit = '', varExpr = formula;
-    const evalVars = {...vars}; delete evalVars[varName];
-    try { varVal = parseFloat(evalFormula(formula, evalVars).replace(/,/g, '')); } catch(e) { varVal = NaN; }
-    if (!isNaN(varVal) && !varUnit) {
-      const inferred = evalUnitExpr(formula, varUnits);
-      if (inferred && Object.keys(inferred).length) { varUnit = varSiUnit = unitObjToStr(unitObjToSIBase(inferred)); }
-      else { const lit = inferUnitFromExprLiterals(formula); if (lit) { varUnit = varSiUnit = lit; } }
-    }
+    try { varVal = parseFloat(evalFormula(formula, vars).replace(/,/g, '')); } catch(e) { varVal = NaN; }
     if (isNaN(varVal)) {
       const ue = extractValueAndUnit(formula);
       if (ue) {
@@ -2158,21 +1862,14 @@ function commitFormula(ed) {
         else { varVal = ue.val; varSiUnit = varUnit; }
       }
     }
-    // Commit chip whether valid or error — don't fall through to formula chip
-    {
+    if (!isNaN(varVal)) {
       const parent = node.parentNode;
       const frag = document.createDocumentFragment();
-      let prefixNode = null;
-      if (prefix) { prefixNode = document.createTextNode(prefix); frag.appendChild(prefixNode); }
-      const chip = isNaN(varVal)
-        ? makeVarDefChip(varName, NaN, formula, '', '', outputUnit)
-        : makeVarDefChip(varName, varVal, varExpr, varUnit, varSiUnit, outputUnit);
-      if (isNaN(varVal)) { chip.dataset.evalError = 'cannot evaluate'; renderVarChipContent(chip); }
-      frag.appendChild(chip);
-      const spacer = document.createTextNode(' ');
+      if (prefix) frag.appendChild(document.createTextNode(prefix));
+      frag.appendChild(makeVarDefChip(varName, varVal, varExpr, varUnit, varSiUnit, outputUnit));
+      const spacer = document.createTextNode(' ');
       frag.appendChild(spacer);
       parent.replaceChild(frag, node);
-      if (prefixNode) autoCommitResidual(prefixNode);
       const r = document.createRange();
       r.setStartAfter(spacer); r.collapse(true);
       sel.removeAllRanges(); sel.addRange(r);
@@ -2187,13 +1884,11 @@ function commitFormula(ed) {
   catch(ex) { result = ex.message || 'Error'; isError = true; }
   const parent = node.parentNode;
   const frag = document.createDocumentFragment();
-  let beforeNode = null;
-  if (before) { beforeNode = document.createTextNode(before); frag.appendChild(beforeNode); }
+  if (before) frag.appendChild(document.createTextNode(before));
   frag.appendChild(makeFormulaChip(formula, result, isError, outputUnit));
   const spacer = document.createTextNode('\u00A0');
   frag.appendChild(spacer);
   parent.replaceChild(frag, node);
-  if (beforeNode) autoCommitResidual(beforeNode);
   const r = document.createRange();
   r.setStartAfter(spacer); r.collapse(true);
   sel.removeAllRanges(); sel.addRange(r);
@@ -2201,45 +1896,6 @@ function commitFormula(ed) {
 }
 
 function cancelFormula() { formulaBuffer = null; }
-
-// After committing a chip, auto-commit any remaining formula in the prefix text node.
-// This handles cases like "A = 3  B = 4" typed on one line — both get committed.
-function autoCommitResidual(textNode) {
-  if (!textNode || textNode.nodeType !== Node.TEXT_NODE || !textNode.parentNode) return;
-  const text = textNode.textContent.trim();
-  const eqIdx = text.lastIndexOf('=');
-  if (eqIdx === -1) return;
-  const formulaPart = text.slice(eqIdx + 1).trim();
-  if (!formulaPart) return;
-  const beforePart = text.slice(0, eqIdx);
-  const varMatch = beforePart.trimEnd().match(/^([\s\S]*\s)?([a-zA-Z][a-zA-Z0-9_]*)$/);
-  if (!varMatch) return;
-  const varName = varMatch[2];
-  const prefix = varMatch[1] || '';
-  if (document.querySelector(`.var-def-chip[data-var-name="${CSS.escape(varName)}"]`)) return;
-  let varVal, varUnit = '', varSiUnit = '', varExpr = formulaPart;
-  let outputUnit = '';
-  const unitSpec = formulaPart.match(/^(.*?)\s*\[([^\]]+)\]\s*$/);
-  if (unitSpec) { varExpr = unitSpec[1].trim(); outputUnit = unitSpec[2].trim(); }
-  const evalVars = {...vars}; delete evalVars[varName];
-  try { varVal = parseFloat(evalFormula(varExpr, evalVars).replace(/,/g, '')); } catch(e) { varVal = NaN; }
-  if (isNaN(varVal)) {
-    const ue = extractValueAndUnit(varExpr);
-    if (!ue) return;
-    varUnit = ue.unit; varExpr = ue.numStr;
-    const conv = applyUnitConversion(ue.val, varUnit);
-    if (conv) { varVal = conv.siVal; varSiUnit = conv.siUnitStr; }
-    else { varVal = ue.val; varSiUnit = varUnit; }
-  }
-  if (isNaN(varVal)) return;
-  const parent = textNode.parentNode;
-  const frag = document.createDocumentFragment();
-  let prefixNode = null;
-  if (prefix) { prefixNode = document.createTextNode(prefix); frag.appendChild(prefixNode); }
-  frag.appendChild(makeVarDefChip(varName, varVal, varExpr, varUnit, varSiUnit, outputUnit));
-  parent.replaceChild(frag, textNode);
-  if (prefixNode) autoCommitResidual(prefixNode);
-}
 
 // Click a formula chip to expand it back to editable text
 document.addEventListener('click', e => {
@@ -2340,12 +1996,6 @@ function attachImageHandlers(wrap) {
   });
 }
 document.addEventListener('mousedown', e => { if (!e.target.closest('.calc-img-wrap')) deselectAllImages(); });
-document.addEventListener('mousedown', e => {
-  if (formulaBuffer === null) return;
-  const ed = getActiveEditor();
-  if (!ed || ed.contains(e.target)) return;
-  commitFormula(ed);
-});
 document.addEventListener('keydown', e => {
   if (selectedImg && (e.key === 'Delete' || e.key === 'Backspace')) {
     let active = document.activeElement;
@@ -2545,14 +2195,11 @@ function toggleFileMenu() { document.getElementById('fileDropdown').classList.to
 function closeFileMenu() { document.getElementById('fileDropdown').classList.remove('open'); }
 document.addEventListener('mousedown', e => { if (!e.target.closest('#fileMenuWrap')) closeFileMenu(); });
 
-const META_IDS = ['m-project','m-projno','m-date','m-desc','m-sheet','m-orig','m-deliv','m-checked','m-suit','m-rev'];
 function collectMeta() {
-  const out = {}; META_IDS.forEach(id => { const el = document.getElementById(id); out[id] = el ? el.value : ''; }); return out;
+  const ids = ['m-project','m-projno','m-date','m-desc','m-sheet','m-orig','m-deliv','m-checked','m-suit','m-rev'];
+  const out = {}; ids.forEach(id => { const el = document.getElementById(id); out[id] = el ? el.value : ''; }); return out;
 }
-function restoreMeta(meta) {
-  META_IDS.forEach(id => { const el=document.getElementById(id); if(el)el.value=''; });
-  Object.entries(meta).forEach(([id,val]) => { const el=document.getElementById(id); if(el)el.value=val; });
-}
+function restoreMeta(meta) { Object.entries(meta).forEach(([id,val]) => { const el=document.getElementById(id); if(el)el.value=val; }); }
 
 function buildSaveData() {
   const pages = [];
