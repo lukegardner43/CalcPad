@@ -1700,6 +1700,55 @@ function reflow(edEl, contEl) {
   rebuildVars();
 }
 
+// Lightweight reflow for print pre-flight — called in beforeprint when print CSS is
+// already active, so clientHeight and scrollHeight are print-mode values.
+// Does not call rebuildVars/scheduleReflow to avoid side-effects during printing.
+function printReflow(edEl, contEl) {
+  let prevOverflow = edEl.style.overflow;
+  edEl.style.overflow = 'visible';
+  const trueScrollH = edEl.scrollHeight;
+  edEl.style.overflow = prevOverflow;
+
+  const maxH = contEl.clientHeight;
+  if (trueScrollH <= maxH) return;
+
+  let rawId = edEl.id.replace('editor', '');
+  const edIdx = rawId === '' ? 0 : parseInt(rawId);
+  const nextEdId = 'editor' + (edIdx + 1);
+  let nextEdEl = document.getElementById(nextEdId);
+  if (!nextEdEl) nextEdEl = addPage();
+  const nextContEl = nextEdEl.closest('.pg-content');
+
+  edEl.style.overflow = 'visible';
+  const children = Array.from(edEl.childNodes);
+  let splitIndex = children.length;
+  for (let i = 0; i < children.length; i++) {
+    const node = children[i];
+    let nodeBottom = 0;
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      nodeBottom = node.offsetTop + node.offsetHeight;
+    } else if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
+      const r = document.createRange();
+      r.selectNode(node);
+      const rect = r.getBoundingClientRect();
+      const edRect = edEl.getBoundingClientRect();
+      nodeBottom = rect.bottom - edRect.top;
+    } else { continue; }
+    if (nodeBottom > maxH) { splitIndex = i; break; }
+  }
+  edEl.style.overflow = prevOverflow;
+
+  if (splitIndex === 0 || splitIndex === children.length) return;
+
+  const overflow = children.slice(splitIndex);
+  const frag = document.createDocumentFragment();
+  overflow.forEach(n => frag.appendChild(n));
+  if (nextEdEl.firstChild) nextEdEl.insertBefore(frag, nextEdEl.firstChild);
+  else nextEdEl.appendChild(frag);
+
+  printReflow(nextEdEl, nextContEl);
+}
+
 // ── Init ──────────────────────────────────────────────────────
 document.getElementById('m-date').value = new Date().toLocaleDateString('en-GB');
 document.getElementById('m-sheet').value = '1';
@@ -2468,8 +2517,7 @@ async function exportWord() {
 
 // ── Print helpers ──────────────────────────────────────────────────────────
 const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ||
-               (navigator.userAgent.includes('Mac') && 'ontouchend' in document);
+               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 // iOS AirPrint ignores @page margin:0 and adds ~5mm system margins each side,
 // so usable page height is ~287mm instead of 297mm.
@@ -2477,9 +2525,20 @@ window.addEventListener('beforeprint', function () {
   if (_isIOS) {
     document.querySelectorAll('.a4-page').forEach(p => { p.style.height = '287mm'; p.style.maxHeight = '287mm'; });
   }
+  // Pre-flight: at this point print CSS is active so clientHeight/scrollHeight are
+  // print-mode values. Split any page whose content is taller than the print area.
+  _rebuildActive = true; // suppress MO-triggered reflows during DOM moves
+  const editors = Array.from(document.querySelectorAll('.calc-area'));
+  editors.forEach(edEl => {
+    const contEl = edEl.closest('.pg-content');
+    if (contEl) printReflow(edEl, contEl);
+  });
+  setTimeout(() => { _rebuildActive = false; }, 800);
 });
 window.addEventListener('afterprint', function () {
   document.querySelectorAll('.a4-page').forEach(p => { p.style.height = ''; p.style.maxHeight = ''; });
+  // Rebuild so chips re-render in screen mode after any DOM moves
+  setTimeout(rebuildVars, 50);
 });
 
 function triggerPrint() {
