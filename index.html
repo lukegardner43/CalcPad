@@ -279,7 +279,7 @@ body{
 @media print{
   @page{size:A4 portrait;margin:0}
 
-  .toolbar,.sidebar,.add-page-btn,.overflow-indicator,
+  .toolbar,.sidebar,.add-page-btn,.overflow-indicator,.alpha-banner,
   .pg-content-overflow{display:none!important;border-color:var(--bdr)!important}
 
   body{background:#fff!important;padding:0;margin:0;display:block}
@@ -733,6 +733,38 @@ function unitObjToLatex(u) {
   const denStr = neg.map(([s,e])=>fmt(s,e)).join('\\,');
   return '\\,'+(posStr||'1')+'/'+denStr;
 }
+// Fundamental SI decomposition for named unit symbols (dimension only — ignores scale prefixes)
+const UNIT_FUNDAMENTALS = {
+  kg:{kg:1}, m:{m:1}, s:{s:1}, A:{A:1}, K:{K:1},
+  mm:{m:1}, cm:{m:1}, km:{m:1}, g:{kg:1}, t:{kg:1},
+  ms:{s:1}, min:{s:1}, hr:{s:1},
+  N:{kg:1,m:1,s:-2}, kN:{kg:1,m:1,s:-2}, MN:{kg:1,m:1,s:-2},
+  Pa:{kg:1,m:-1,s:-2}, kPa:{kg:1,m:-1,s:-2}, MPa:{kg:1,m:-1,s:-2}, GPa:{kg:1,m:-1,s:-2},
+  J:{kg:1,m:2,s:-2}, W:{kg:1,m:2,s:-3}, Hz:{s:-1}, rad:{},
+};
+function toFundamental(unitObj) {
+  if (!unitObj) return null;
+  const r = {};
+  for (const [sym, exp] of Object.entries(unitObj)) {
+    const base = UNIT_FUNDAMENTALS[sym];
+    if (!base) return null;
+    for (const [fs, fe] of Object.entries(base)) { r[fs]=(r[fs]||0)+fe*exp; if(!r[fs])delete r[fs]; }
+  }
+  return r;
+}
+// Common fundamental→compact mappings so {kg,m,s} vectors display as named units
+const _COMPACT_UNITS = [
+  [{kg:1,m:1,s:-2},'N'],[{kg:1,m:-1,s:-2},'N/m^2'],[{kg:1,s:-2},'N/m'],
+  [{kg:1,m:-2,s:-2},'N/m^3'],[{kg:1,m:2,s:-2},'N*m'],
+];
+function simplifyUnitStr(unitObj) {
+  if (!unitObj) return null;
+  const fund = toFundamental(unitObj);
+  if (!fund) return null;
+  const eq=(a,b)=>{const ka=Object.keys(a),kb=Object.keys(b);return ka.length===kb.length&&ka.every(k=>a[k]===b[k]);};
+  for (const [pat, name] of _COMPACT_UNITS) if (eq(pat, fund)) return name;
+  return null;
+}
 // Evaluate the result unit of a formula given variable unit strings.
 function evalUnitExpr(formula, varUnitsMap) {
   if (!varUnitsMap||!Object.keys(varUnitsMap).length) return {};
@@ -740,7 +772,7 @@ function evalUnitExpr(formula, varUnitsMap) {
   let pos=0;
   const peek=()=>toks[pos], consume=()=>toks[pos++], eat=t=>{if(peek().t===t){consume();return true;}return false;};
   const eq=(a,b)=>{if(!a||!b)return false;const ka=Object.keys(a),kb=Object.keys(b);return ka.length===kb.length&&ka.every(k=>a[k]===b[k]);};
-  function parseExpr(){let l=parseTerm();while(peek().t==='+'||peek().t==='-'){consume();const r=parseTerm();if(l===null)l=r;else if(r!==null&&!eq(l,r))l=null;}return l;}
+  function parseExpr(){let l=parseTerm();while(peek().t==='+'||peek().t==='-'){consume();const r=parseTerm();if(l===null)l=r;else if(r!==null&&!eq(l,r)){const lf=toFundamental(l),rf=toFundamental(r);if(!lf||!rf||!eq(lf,rf))l=null;}}return l;}
   function parseTerm(){let l=parseUnary();while(peek().t==='*'||peek().t==='/'){const op=consume().t;const r=parseUnary();l=op==='*'?unitMul(l,r):unitDiv(l,r);}return l;}
   function parseUnary(){if(peek().t==='-'||peek().t==='+'){consume();return parseUnary();}return parsePower();}
   function parsePower(){const base=parsePrimary();if(peek().t==='^'){consume();let sign=1;if(peek().t==='-'){consume();sign=-1;}else if(peek().t==='+')consume();if(peek().t==='num'){const n=parseFloat(consume().v)*sign;return unitPow(base,n);}parseUnary();return null;}return base;}
@@ -1053,11 +1085,14 @@ function renderVarChipContent(chip) {
     const exprUnit = evalUnitExpr(expr, varUnits);
     // Check for unit dimension mismatch when a display unit is specified
     if (displayUnit && exprUnit && Object.keys(exprUnit).length) {
-      const specBase = unitObjToSIBase(parseUnitStr(displayUnit));
-      if (Object.keys(specBase).length && !unitObjEq(exprUnit, specBase)) {
-        chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">${name}: unit mismatch [${displayUnit}] vs [${unitObjToStr(exprUnit)}]</span>`;
-        chip.title = `Unit mismatch: formula gives [${unitObjToStr(exprUnit)}] but [${displayUnit}] was specified`;
-        return;
+      const specUnitObj = parseUnitStr(displayUnit);
+      if (Object.keys(specUnitObj).length) {
+        const exF = toFundamental(exprUnit), spF = toFundamental(specUnitObj);
+        if (!exF || !spF || !unitObjEq(exF, spF)) {
+          chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">${name}: unit mismatch [${displayUnit}] vs [${unitObjToStr(exprUnit)}]</span>`;
+          chip.title = `Unit mismatch: formula gives [${unitObjToStr(exprUnit)}] but [${displayUnit}] was specified`;
+          return;
+        }
       }
     }
     let exprUnitSuffix, displayValStr;
@@ -1066,7 +1101,12 @@ function renderVarChipContent(chip) {
       displayValStr = fmtNumDisplay(dFactor !== null ? val / dFactor : val);
       exprUnitSuffix = unitToLatex(displayUnit);
     } else {
-      exprUnitSuffix = exprUnit && Object.keys(exprUnit).length ? unitObjToLatex(exprUnit) : (unit ? unitToLatex(unit) : '');
+      if (exprUnit && Object.keys(exprUnit).length) {
+        const simplName = simplifyUnitStr(exprUnit);
+        exprUnitSuffix = unitObjToLatex(simplName ? parseUnitStr(simplName) : exprUnit);
+      } else {
+        exprUnitSuffix = unit ? unitToLatex(unit) : '';
+      }
       displayValStr = fmtNumDisplay(val);
     }
     try {
@@ -1241,12 +1281,15 @@ function setFormulaContent(chip, formula, result, isError) {
     if (outputUnit) {
       // Check that the specified unit is dimensionally compatible with the formula result
       if (resUnit && Object.keys(resUnit).length) {
-        const specBase = unitObjToSIBase(parseUnitStr(outputUnit));
-        if (Object.keys(specBase).length && !unitObjEq(resUnit, specBase)) {
-          chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">unit mismatch: result is [${unitObjToStr(resUnit)}] not [${outputUnit}]</span>`;
-          chip.className = 'formula-chip error';
-          chip.title = `Unit mismatch: formula gives [${unitObjToStr(resUnit)}] but [${outputUnit}] was specified`;
-          return;
+        const specUnitObj = parseUnitStr(outputUnit);
+        if (Object.keys(specUnitObj).length) {
+          const resF = toFundamental(resUnit), specF = toFundamental(specUnitObj);
+          if (!resF || !specF || !unitObjEq(resF, specF)) {
+            chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">unit mismatch: result is [${unitObjToStr(resUnit)}] not [${outputUnit}]</span>`;
+            chip.className = 'formula-chip error';
+            chip.title = `Unit mismatch: formula gives [${unitObjToStr(resUnit)}] but [${outputUnit}] was specified`;
+            return;
+          }
         }
       }
       const unitObj = parseUnitStr(outputUnit);
@@ -1255,7 +1298,12 @@ function setFormulaContent(chip, formula, result, isError) {
       unitSuffix = unitToLatex(outputUnit);
     } else {
       displayVal = fmtNumDisplay(rawSI);
-      unitSuffix = resUnit && Object.keys(resUnit).length ? unitObjToLatex(resUnit) : '';
+      if (resUnit && Object.keys(resUnit).length) {
+        const simplName = simplifyUnitStr(resUnit);
+        unitSuffix = unitObjToLatex(simplName ? parseUnitStr(simplName) : resUnit);
+      } else {
+        unitSuffix = '';
+      }
     }
     const rhs = numToLatex(displayVal) + unitSuffix;
     const kx = s => katex.renderToString(s, {displayMode: false, throwOnError: false, output: 'html'});
@@ -1698,7 +1746,7 @@ function rebuildVars() {
               chip.dataset.varVal = String(v);
               vars[name] = v;
               if (unit) { varUnits[name] = siUnit; }
-              else { const inf = evalUnitExpr(expr, varUnits); if (inf && Object.keys(inf).length) varUnits[name] = unitObjToStr(inf); }
+              else { const inf = evalUnitExpr(expr, varUnits); if (inf && Object.keys(inf).length) varUnits[name] = simplifyUnitStr(inf) || unitObjToStr(inf); }
               renderVarChipContent(chip);
             }
           } catch(e) {
