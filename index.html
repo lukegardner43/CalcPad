@@ -1563,13 +1563,16 @@ function initPage1Height() {
 // move excess to the next page (creating one if needed).
 
 const reflowDebounce = new Map();
+let _rebuildActive = false; // suppresses MutationObserver-triggered reflow during rebuildVars
 
 function attachOverflowMonitor(edEl, contEl) {
-  const handler = () => scheduleReflow(edEl, contEl);
-  const mo = new MutationObserver(handler);
+  // Only suppress mutation-driven reflow during programmatic chip updates, not user typing
+  const moHandler = () => { if (!_rebuildActive) scheduleReflow(edEl, contEl); };
+  const inputHandler = () => scheduleReflow(edEl, contEl);
+  const mo = new MutationObserver(moHandler);
   mo.observe(edEl, { childList:true, subtree:true, characterData:true });
-  edEl.addEventListener('input', handler);
-  edEl.addEventListener('keyup', handler);
+  edEl.addEventListener('input', inputHandler);
+  edEl.addEventListener('keyup', inputHandler);
 }
 
 function scheduleReflow(edEl, contEl) {
@@ -1729,6 +1732,7 @@ function getAllEditors() {
 
 // Override rebuildVars to scan all editors in document order (vars then formulas interleaved)
 function rebuildVars() {
+  _rebuildActive = true;
   vars = {};
   varUnits = {};
   getAllEditors().forEach(ed => {
@@ -1777,6 +1781,8 @@ function rebuildVars() {
   });
   renderSidebar();
   autoSave();
+  // Release suppression after MutationObserver microtasks have fired and been ignored
+  setTimeout(() => { _rebuildActive = false; }, 200);
 }
 
 function recalcAll() { rebuildVars(); }
