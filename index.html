@@ -287,23 +287,27 @@ body{
 @media print{
   @page{size:A4 portrait;margin:0}
 
+  html{height:auto!important}
   .toolbar,.sidebar,.add-page-btn,.del-page-btn,.overflow-indicator,.alpha-banner,
   .pg-content-overflow{display:none!important;border-color:var(--bdr)!important}
 
-  body{background:#fff!important;padding:0;margin:0;display:block}
+  body{background:#fff!important;padding:0;margin:0;display:block;height:auto!important}
   .page-stack{margin:0;gap:0;display:block}
-  .page-wrap{display:block}
+  .page-wrap{display:block;position:static}
 
+  /* Each .a4-page = exactly one printed sheet. iOS overrides height via JS beforeprint. */
   .a4-page{
-    width:210mm;min-height:297mm;
+    width:210mm;height:297mm;max-height:297mm;
+    display:flex;flex-direction:column;
     box-shadow:none;
+    overflow:hidden;
     page-break-after:always;
-    overflow:visible;
+    break-after:page;
   }
-  .a4-page:last-of-type{page-break-after:avoid}
+  .page-wrap:last-of-type .a4-page{page-break-after:avoid;break-after:avoid}
 
   .pg-header{padding:10mm 14mm 3mm}
-  .pg-content{margin:0 14mm;height:auto;flex:1;overflow:hidden}
+  .pg-content{margin:0 14mm;flex:1;overflow:hidden}
   .calc-area{
     height:100%;padding:2mm 4mm;
     font-size:10pt;line-height:1.7;
@@ -450,7 +454,7 @@ body{
     </div>
   </div>
   <div class="sep"></div>
-  <button class="tbtn print-btn" onclick="window.print()">
+  <button class="tbtn print-btn" onclick="triggerPrint()">
     <svg viewBox="0 0 16 16" style="width:13px;height:13px"><path d="M4 1.5h8v3.5H4V1.5zm-2 4h12c.55 0 1 .45 1 1v4.5c0 .55-.45 1-1 1H13v3H3v-3H2c-.55 0-1-.45-1-1V6.5c0-.55.45-1 1-1zm1 1.5c-.41 0-.75.34-.75.75s.34.75.75.75.75-.34.75-.75S3.41 7 3 7zM5 11.5h6V14H5v-2.5z" fill="white"/></svg>
     Print
   </button>
@@ -2460,6 +2464,27 @@ async function exportWord() {
     a.href=url;a.download=(currentFileName||'calculations')+'.docx';
     document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
   } catch(err){alert('Export failed: '+err.message);console.error(err);}
+}
+
+// ── Print helpers ──────────────────────────────────────────────────────────
+const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ||
+               (navigator.userAgent.includes('Mac') && 'ontouchend' in document);
+
+// iOS AirPrint ignores @page margin:0 and adds ~5mm system margins each side,
+// so usable page height is ~287mm instead of 297mm.
+window.addEventListener('beforeprint', function () {
+  if (_isIOS) {
+    document.querySelectorAll('.a4-page').forEach(p => { p.style.height = '287mm'; p.style.maxHeight = '287mm'; });
+  }
+});
+window.addEventListener('afterprint', function () {
+  document.querySelectorAll('.a4-page').forEach(p => { p.style.height = ''; p.style.maxHeight = ''; });
+});
+
+function triggerPrint() {
+  if (_isIOS) { window.print(); return; }
+  document.getElementById('printWarning').style.display = 'flex';
 }
 </script>
 </body>
