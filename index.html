@@ -962,8 +962,15 @@ function toLatex(rawFormula, subsMap) {
   }
 
   function stripParens(s) {
-    if (s && s.startsWith('\\left(') && s.endsWith('\\right)')) return s.slice(6, -7);
-    return s;
+    if (!s || !s.startsWith('\\left(')) return s;
+    // Walk to find the \right) that matches the opening \left( — only strip if it reaches the end
+    let depth = 0, i = 0;
+    while (i < s.length) {
+      if (s.startsWith('\\left', i)) { depth++; i += 5; }
+      else if (s.startsWith('\\right', i)) { depth--; i += 6; if (depth === 0) { i++; break; } }
+      else i++;
+    }
+    return i === s.length ? s.slice(6, -7) : s;
   }
 
   function parseExpr() {
