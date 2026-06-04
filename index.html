@@ -133,7 +133,7 @@ body{
   align-items:flex-start;
   gap:24px;
 }
-.page-wrap{display:flex;gap:16px;align-items:flex-start}
+.page-wrap{display:flex;gap:16px;align-items:flex-start;position:relative}
 
 /* A4 at 96dpi = 794 × 1123px */
 .a4-page{
@@ -209,6 +209,14 @@ body{
   transition:background .1s;border-radius:2px;
 }
 .add-page-btn:hover{background:#fce6f1;border-color:var(--rubine);color:var(--rubine)}
+.del-page-btn{
+  position:absolute;top:6px;right:6px;width:22px;height:22px;
+  background:#fff;border:1px solid #ccc;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;font-size:13px;color:#999;line-height:1;
+  z-index:10;transition:background .1s,color .1s;
+}
+.del-page-btn:hover{background:#fce6f1;border-color:var(--rubine);color:var(--rubine)}
 
 /* ── Page footer ── */
 .pg-footer{flex-shrink:0;padding:5px 26px 10px;text-align:right;
@@ -279,7 +287,7 @@ body{
 @media print{
   @page{size:A4 portrait;margin:0}
 
-  .toolbar,.sidebar,.add-page-btn,.overflow-indicator,.alpha-banner,
+  .toolbar,.sidebar,.add-page-btn,.del-page-btn,.overflow-indicator,.alpha-banner,
   .pg-content-overflow{display:none!important;border-color:var(--bdr)!important}
 
   body{background:#fff!important;padding:0;margin:0;display:block}
@@ -1551,10 +1559,32 @@ function addPage() {
   newEdEl.focus();
   setActiveEditor(newEdEl);
 
+  // Delete-page button (page 2+)
+  const delBtn = document.createElement('div');
+  delBtn.className = 'del-page-btn';
+  delBtn.title = 'Delete this page';
+  delBtn.textContent = '×';
+  delBtn.addEventListener('click', () => deletePage(wrap));
+  wrap.appendChild(delBtn);
+
   // Attach overflow monitoring
   attachOverflowMonitor(newEdEl, cont);
   attachTableHandlersToArea(newEdEl);
   return newEdEl;
+}
+
+function deletePage(wrap) {
+  if (!confirm('Delete this page? Its content will be moved to the previous page.')) return;
+  const edEl = wrap.querySelector('.calc-area');
+  const prevWrap = wrap.previousElementSibling;
+  const prevEd = prevWrap && prevWrap.querySelector('.calc-area');
+  if (prevEd && edEl) {
+    // Move all child nodes to end of previous editor
+    while (edEl.firstChild) prevEd.appendChild(edEl.firstChild);
+  }
+  wrap.remove();
+  pageCount = Math.max(1, pageCount - 1);
+  rebuildVars();
 }
 
 // Set content height on page 1
@@ -1690,6 +1720,9 @@ function autoSave() {
     try { localStorage.setItem(LS_KEY, buildSaveData()); } catch(e) {}
   }, 500);
 }
+function reattachImageHandlers() {
+  document.querySelectorAll('.calc-img-wrap').forEach(wrap => attachImageHandlers(wrap));
+}
 function loadFromLocalStorage() {
   try {
     const raw = localStorage.getItem(LS_KEY);
@@ -1702,6 +1735,7 @@ function loadFromLocalStorage() {
     for (let i = 1; i < pages.length; i++) { const newEd = addPage(); newEd.innerHTML = pages[i] || ''; }
     restoreMeta(data.meta || {});
     updateMirrorHeaders();
+    reattachImageHandlers();
   } catch(e) {}
 }
 
@@ -2365,6 +2399,7 @@ function loadFile(input) {
       updateMirrorHeaders();
       currentFileName = file.name.replace(/\.perega$/, '');
       isDirty = false; document.title = currentFileName + ' — CalcPad';
+      reattachImageHandlers();
       rebuildVars();
     } catch(err) { alert('Could not open file: ' + err.message); }
   };
