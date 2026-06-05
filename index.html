@@ -133,7 +133,7 @@ body{
   align-items:flex-start;
   gap:24px;
 }
-.page-wrap{display:flex;gap:16px;align-items:flex-start}
+.page-wrap{display:flex;gap:16px;align-items:flex-start;position:relative}
 
 /* A4 at 96dpi = 794 × 1123px */
 .a4-page{
@@ -209,10 +209,18 @@ body{
   transition:background .1s;border-radius:2px;
 }
 .add-page-btn:hover{background:#fce6f1;border-color:var(--rubine);color:var(--rubine)}
+.del-page-btn{
+  position:absolute;top:6px;right:6px;width:22px;height:22px;
+  background:#fff;border:1px solid #ccc;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;font-size:13px;color:#999;line-height:1;
+  z-index:10;transition:background .1s,color .1s;
+}
+.del-page-btn:hover{background:#fce6f1;border-color:var(--rubine);color:var(--rubine)}
 
 /* ── Page footer ── */
 .pg-footer{flex-shrink:0;padding:5px 26px 10px;text-align:right;
-  font-size:9px;color:var(--mid);border-top:1px solid #ddd;margin-top:4px}
+  font-size:9px;color:var(--mid);margin-top:4px}
 
 /* ── Chips ── */
 .var-def-chip{display:inline-flex;align-items:baseline;font-family:Arial,sans-serif;
@@ -273,42 +281,57 @@ body{
 .sref-i span{color:var(--dark)}
 
 /* ══════════════════ PRINT ══════════════════
-   Each .a4-page prints as exactly one page.
-   page-break-after:always on every page except the last.
+   WYSIWYG: each .a4-page prints as exactly one A4 sheet.
+   The page box is sized in mm so it fills the physical sheet, but ALL inner
+   metrics (header/content/footer padding, font-size, line-height) are left at
+   their screen px values. Since .a4-page is 794×1123px = A4 at 96dpi, the print
+   layout is pixel-identical to the screen — what you see is what prints, with
+   the same number of pages.
    ═══════════════════════════════════════════ */
 @media print{
   @page{size:A4 portrait;margin:0}
 
-  .toolbar,.sidebar,.add-page-btn,.overflow-indicator,.alpha-banner,
+  html{height:auto!important}
+  .toolbar,.sidebar,.add-page-btn,.del-page-btn,.overflow-indicator,.alpha-banner,
   .pg-content-overflow{display:none!important;border-color:var(--bdr)!important}
 
-  body{background:#fff!important;padding:0;margin:0;display:block}
+  body{background:#fff!important;padding:0;margin:0;display:block;height:auto!important}
   .page-stack{margin:0;gap:0;display:block}
-  .page-wrap{display:block}
+  .page-wrap{display:block;position:static}
 
+  /* Each .a4-page = exactly one printed sheet (iOS scales it down via the rule below). */
   .a4-page{
-    width:210mm;min-height:297mm;
+    width:210mm;height:297mm;max-height:297mm;
     box-shadow:none;
+    overflow:hidden;
     page-break-after:always;
-    overflow:visible;
+    break-after:page;
   }
-  .a4-page:last-of-type{page-break-after:avoid}
+  .page-wrap:last-of-type .a4-page{page-break-after:avoid;break-after:avoid}
 
-  .pg-header{padding:10mm 14mm 3mm}
-  .pg-content{margin:0 14mm;height:auto;flex:1;overflow:hidden}
-  .calc-area{
-    height:100%;padding:2mm 4mm;
-    font-size:10pt;line-height:1.7;
-    border:0.5pt solid #888;
+  /* iOS AirPrint ignores @page{margin:0} and its margins are large enough that a
+     full-size page spills onto a second sheet. `zoom` is NOT reliably honored in iOS
+     Safari's print path, so we scale with a `transform` (which IS honored). Because a
+     transform doesn't shrink the element's layout box, we also shrink the box that
+     actually paginates — .page-wrap — to the scaled height, so each page still maps to
+     exactly one sheet. Layout, line wraps and page breaks are unchanged; just smaller. */
+  html.ios-print .a4-page{
+    transform:scale(0.78);
+    transform-origin:top left;
+    page-break-after:auto;
+    break-after:auto;
   }
-  .pg-footer{padding:3mm 14mm 6mm;border-top:0.5pt solid #aaa}
-  .meta{margin-bottom:3mm}
-  .mc{height:auto;min-height:22px}
-  .mc input{height:auto;line-height:1.4}
+  html.ios-print .page-wrap{
+    height:calc(297mm * 0.78); /* 231.66mm — scaled flow height that paginates */
+    overflow:hidden;
+    page-break-after:always;
+    break-after:page;
+  }
+  html.ios-print .page-wrap:last-of-type{ page-break-after:avoid;break-after:avoid; }
 
+  /* Inner layout intentionally NOT overridden — inherits screen px metrics for WYSIWYG. */
   .calc-table thead{display:table-header-group}
   .calc-table tr{break-inside:avoid;page-break-inside:avoid}
-  .calc-table td,.calc-table th{padding:2px 5px;font-size:10pt}
   .formula-chip,.var-def-chip{break-inside:avoid}
   h1,h2,h3{break-after:avoid}
 }
@@ -442,7 +465,7 @@ body{
     </div>
   </div>
   <div class="sep"></div>
-  <button class="tbtn print-btn" onclick="window.print()">
+  <button class="tbtn print-btn" onclick="triggerPrint()">
     <svg viewBox="0 0 16 16" style="width:13px;height:13px"><path d="M4 1.5h8v3.5H4V1.5zm-2 4h12c.55 0 1 .45 1 1v4.5c0 .55-.45 1-1 1H13v3H3v-3H2c-.55 0-1-.45-1-1V6.5c0-.55.45-1 1-1zm1 1.5c-.41 0-.75.34-.75.75s.34.75.75.75.75-.34.75-.75S3.41 7 3 7zM5 11.5h6V14H5v-2.5z" fill="white"/></svg>
     Print
   </button>
@@ -508,7 +531,7 @@ body{
         <div id="editor" class="calc-area" contenteditable="true" spellcheck="true"
           data-placeholder="Begin calculations… type x = 42 then Enter to define a variable, =x^2+3 then Enter for a formula."></div>
       </div>
-      <div class="pg-footer">Alpha — updated 27.04.26</div>
+      <div class="pg-footer">Alpha — updated 05.06.26</div>
     </div>
 
     <!-- Sidebar (only shown next to page 1) -->
@@ -566,6 +589,10 @@ body{
 let editor = document.getElementById('editor');
 let vars = {};
 let varUnits = {};
+
+// Footer "updated" date — the date the tool itself was last updated (build date),
+// shown as DD.MM.YY. Bump this whenever the app code changes.
+const FOOTER_TEXT = 'Alpha — updated 05.06.26';
 
 // ── Variable store ─────────────────────────────────────────
 
@@ -962,8 +989,15 @@ function toLatex(rawFormula, subsMap) {
   }
 
   function stripParens(s) {
-    if (s && s.startsWith('\\left(') && s.endsWith('\\right)')) return s.slice(6, -7);
-    return s;
+    if (!s || !s.startsWith('\\left(')) return s;
+    // Walk to find the \right) that matches the opening \left( — only strip if it reaches the end
+    let depth = 0, i = 0;
+    while (i < s.length) {
+      if (s.startsWith('\\left', i)) { depth++; i += 5; }
+      else if (s.startsWith('\\right', i)) { depth--; i += 6; if (depth === 0) { i++; break; } }
+      else i++;
+    }
+    return i === s.length ? s.slice(6, -7) : s;
   }
 
   function parseExpr() {
@@ -1244,6 +1278,7 @@ function startEditFormulaChip(chip) {
 
 function startEditVarDefChip(chip) {
   formulaBuffer = null;
+  _editingVarDef = true;
   const name = chip.dataset.varName;
   const expr = chip.dataset.varExpr || chip.dataset.varOrigNum || chip.dataset.varVal;
   const unit = chip.dataset.varUnit || '';
@@ -1329,6 +1364,11 @@ const VAR_RE = /^([a-zA-Z][a-zA-Z0-9_]*)\s*=(?!=)\s*(.+)$/;
 // Greedy .* ensures the variable name is the LAST identifier before =.
 const VAR_DESC_RE = /^(.*\s)([a-zA-Z][a-zA-Z0-9_]*)\s*=(?!=)\s*(.+)$/;
 let formulaBuffer = null;
+// True while a variable-definition chip is expanded to editable text (double/tap to
+// edit). Mirrors formulaBuffer's role for formulas so reflow is suppressed during the
+// edit. Self-heals: cleared on commit, and in the input handler once the caret leaves
+// the "name = …" text being edited.
+let _editingVarDef = false;
 
 
 
@@ -1525,7 +1565,7 @@ function addPage() {
   // Footer
   const ftr = document.createElement('div');
   ftr.className = 'pg-footer';
-  ftr.textContent = 'Alpha — updated 27.04.26';
+  ftr.textContent = FOOTER_TEXT;
   page.appendChild(ftr);
 
   wrap.appendChild(page);
@@ -1544,10 +1584,32 @@ function addPage() {
   newEdEl.focus();
   setActiveEditor(newEdEl);
 
+  // Delete-page button (page 2+)
+  const delBtn = document.createElement('div');
+  delBtn.className = 'del-page-btn';
+  delBtn.title = 'Delete this page';
+  delBtn.textContent = '×';
+  delBtn.addEventListener('click', () => deletePage(wrap));
+  wrap.appendChild(delBtn);
+
   // Attach overflow monitoring
   attachOverflowMonitor(newEdEl, cont);
   attachTableHandlersToArea(newEdEl);
   return newEdEl;
+}
+
+function deletePage(wrap) {
+  if (!confirm('Delete this page? Its content will be moved to the previous page.')) return;
+  const edEl = wrap.querySelector('.calc-area');
+  const prevWrap = wrap.previousElementSibling;
+  const prevEd = prevWrap && prevWrap.querySelector('.calc-area');
+  if (prevEd && edEl) {
+    // Move all child nodes to end of previous editor
+    while (edEl.firstChild) prevEd.appendChild(edEl.firstChild);
+  }
+  wrap.remove();
+  pageCount = Math.max(1, pageCount - 1);
+  rebuildVars();
 }
 
 // Set content height on page 1
@@ -1563,13 +1625,16 @@ function initPage1Height() {
 // move excess to the next page (creating one if needed).
 
 const reflowDebounce = new Map();
+let _rebuildActive = false; // suppresses MutationObserver-triggered reflow during rebuildVars
 
 function attachOverflowMonitor(edEl, contEl) {
-  const handler = () => scheduleReflow(edEl, contEl);
-  const mo = new MutationObserver(handler);
+  // Only suppress mutation-driven reflow during programmatic chip updates, not user typing
+  const moHandler = () => { if (!_rebuildActive) scheduleReflow(edEl, contEl); };
+  const inputHandler = () => scheduleReflow(edEl, contEl);
+  const mo = new MutationObserver(moHandler);
   mo.observe(edEl, { childList:true, subtree:true, characterData:true });
-  edEl.addEventListener('input', handler);
-  edEl.addEventListener('keyup', handler);
+  edEl.addEventListener('input', inputHandler);
+  edEl.addEventListener('keyup', inputHandler);
 }
 
 function scheduleReflow(edEl, contEl) {
@@ -1579,6 +1644,15 @@ function scheduleReflow(edEl, contEl) {
 }
 
 function reflow(edEl, contEl) {
+  // Don't reflow while a formula/variable is being entered or edited. Editing a chip
+  // temporarily expands it from compact KaTeX into longer raw text (=formula [unit]),
+  // which can briefly overflow the page; reflowing then would split the page and yank
+  // the line you're editing onto a new page — an unrecoverable loop. formulaBuffer is
+  // non-null exactly during formula entry/edit; _editingVarDef covers variable-chip
+  // edits. Both clear on commit/cancel, after which the chip is compact again and a
+  // normal reflow runs.
+  if (formulaBuffer !== null || _editingVarDef) return;
+
   // Temporarily allow overflow so we can measure true content height
   let prevOverflow = edEl.style.overflow;
   edEl.style.overflow = 'visible';
@@ -1659,6 +1733,7 @@ function reflow(edEl, contEl) {
 // ── Init ──────────────────────────────────────────────────────
 document.getElementById('m-date').value = new Date().toLocaleDateString('en-GB');
 document.getElementById('m-sheet').value = '1';
+document.querySelectorAll('.pg-footer').forEach(f => { f.textContent = FOOTER_TEXT; });
 
 // Wait for layout then set heights
 requestAnimationFrame(() => {
@@ -1680,6 +1755,9 @@ function autoSave() {
     try { localStorage.setItem(LS_KEY, buildSaveData()); } catch(e) {}
   }, 500);
 }
+function reattachImageHandlers() {
+  document.querySelectorAll('.calc-img-wrap').forEach(wrap => attachImageHandlers(wrap));
+}
 function loadFromLocalStorage() {
   try {
     const raw = localStorage.getItem(LS_KEY);
@@ -1692,6 +1770,7 @@ function loadFromLocalStorage() {
     for (let i = 1; i < pages.length; i++) { const newEd = addPage(); newEd.innerHTML = pages[i] || ''; }
     restoreMeta(data.meta || {});
     updateMirrorHeaders();
+    reattachImageHandlers();
   } catch(e) {}
 }
 
@@ -1729,6 +1808,7 @@ function getAllEditors() {
 
 // Override rebuildVars to scan all editors in document order (vars then formulas interleaved)
 function rebuildVars() {
+  _rebuildActive = true;
   vars = {};
   varUnits = {};
   getAllEditors().forEach(ed => {
@@ -1777,6 +1857,8 @@ function rebuildVars() {
   });
   renderSidebar();
   autoSave();
+  // Release suppression after MutationObserver microtasks have fired and been ignored
+  setTimeout(() => { _rebuildActive = false; }, 200);
 }
 
 function recalcAll() { rebuildVars(); }
@@ -1792,6 +1874,8 @@ document.addEventListener('keydown', e => {
     if (e.key === 'Escape') { e.preventDefault(); cancelFormula(); return; }
     return;
   }
+  // Escape abandons a variable-chip edit: re-enable reflow (text stays as typed).
+  if (_editingVarDef && e.key === 'Escape') { _editingVarDef = false; }
   if (e.key === 'Enter') {
     const sel = window.getSelection();
     if (!sel.rangeCount) return;
@@ -1850,6 +1934,14 @@ document.addEventListener('input', e => {
   isDirty = true; autoSave();
   clearTimeout(_rebuildTimer);
   _rebuildTimer = setTimeout(rebuildVars, 300);
+  // Self-heal the var-def edit guard: once the caret is no longer in a "name = …"
+  // text node, the edit is over (committed or abandoned) so re-enable reflow.
+  if (_editingVarDef) {
+    const sel = window.getSelection();
+    const node = sel.rangeCount ? sel.getRangeAt(0).startContainer : null;
+    const t = node && node.nodeType === Node.TEXT_NODE ? node.textContent : '';
+    if (!/[a-zA-Z][a-zA-Z0-9_]*\s*=/.test(t)) _editingVarDef = false;
+  }
   if (formulaBuffer !== null) {
     const sel = window.getSelection();
     if (!sel.rangeCount) return;
@@ -1964,6 +2056,7 @@ document.addEventListener('dblclick', e => {
 });
 
 function commitVarDef(textNode, name, val, expr, prefix, unit, siUnit, displayUnit) {
+  _editingVarDef = false;
   const parent = textNode.parentNode;
   const frag = document.createDocumentFragment();
   if (prefix) frag.appendChild(document.createTextNode(prefix));
@@ -2352,6 +2445,7 @@ function loadFile(input) {
       updateMirrorHeaders();
       currentFileName = file.name.replace(/\.perega$/, '');
       isDirty = false; document.title = currentFileName + ' — CalcPad';
+      reattachImageHandlers();
       rebuildVars();
     } catch(err) { alert('Could not open file: ' + err.message); }
   };
@@ -2412,6 +2506,25 @@ async function exportWord() {
     a.href=url;a.download=(currentFileName||'calculations')+'.docx';
     document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
   } catch(err){alert('Export failed: '+err.message);console.error(err);}
+}
+
+// ── Print helpers ──────────────────────────────────────────────────────────
+const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+// Both Chrome/desktop and iOS print are now WYSIWYG with NO reflow:
+//   • Chrome/desktop: @page{margin:0} works, so each on-screen A4 page = one sheet,
+//     rendered at the exact same px metrics as the screen.
+//   • iOS: AirPrint forces its own margins we can't zero out, so the html.ios-print
+//     print rules transform-scale each page to 0.78 and shrink the paginating box to
+//     match — preserving the exact layout and page breaks, just rendered smaller.
+// The ios-print class is set once at load so it only ever takes effect in @media print.
+if (_isIOS) document.documentElement.classList.add('ios-print');
+
+
+function triggerPrint() {
+  if (_isIOS) { window.print(); return; }
+  document.getElementById('printWarning').style.display = 'flex';
 }
 </script>
 </body>
