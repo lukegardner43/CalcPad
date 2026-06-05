@@ -281,8 +281,12 @@ body{
 .sref-i span{color:var(--dark)}
 
 /* ══════════════════ PRINT ══════════════════
-   Each .a4-page prints as exactly one page.
-   page-break-after:always on every page except the last.
+   WYSIWYG: each .a4-page prints as exactly one A4 sheet.
+   The page box is sized in mm so it fills the physical sheet, but ALL inner
+   metrics (header/content/footer padding, font-size, line-height) are left at
+   their screen px values. Since .a4-page is 794×1123px = A4 at 96dpi, the print
+   layout is pixel-identical to the screen — what you see is what prints, with
+   the same number of pages.
    ═══════════════════════════════════════════ */
 @media print{
   @page{size:A4 portrait;margin:0}
@@ -298,7 +302,6 @@ body{
   /* Each .a4-page = exactly one printed sheet. iOS overrides height via JS beforeprint. */
   .a4-page{
     width:210mm;height:297mm;max-height:297mm;
-    display:flex;flex-direction:column;
     box-shadow:none;
     overflow:hidden;
     page-break-after:always;
@@ -306,21 +309,9 @@ body{
   }
   .page-wrap:last-of-type .a4-page{page-break-after:avoid;break-after:avoid}
 
-  .pg-header{padding:10mm 14mm 3mm}
-  .pg-content{margin:0 14mm;flex:1;overflow:hidden}
-  .calc-area{
-    height:100%;padding:2mm 4mm;
-    font-size:10pt;line-height:1.7;
-    border:0.5pt solid #888;
-  }
-  .pg-footer{padding:3mm 14mm 6mm;border-top:0.5pt solid #aaa}
-  .meta{margin-bottom:3mm}
-  .mc{height:auto;min-height:22px}
-  .mc input{height:auto;line-height:1.4}
-
+  /* Inner layout intentionally NOT overridden — inherits screen px metrics for WYSIWYG. */
   .calc-table thead{display:table-header-group}
   .calc-table tr{break-inside:avoid;page-break-inside:avoid}
-  .calc-table td,.calc-table th{padding:2px 5px;font-size:10pt}
   .formula-chip,.var-def-chip{break-inside:avoid}
   h1,h2,h3{break-after:avoid}
 }
@@ -2519,26 +2510,30 @@ async function exportWord() {
 const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
-// iOS AirPrint ignores @page margin:0 and adds ~5mm system margins each side,
-// so usable page height is ~287mm instead of 297mm.
+// Chrome/desktop print is now WYSIWYG: print CSS uses the same px metrics as the
+// screen, so each on-screen A4 page maps to exactly one printed sheet and the page
+// count matches what you see — no pre-flight reflow needed.
+//
+// iOS AirPrint is the exception: it ignores @page margin:0 and adds ~5mm system
+// margins each side, shrinking the usable height to ~287mm. There we shrink the
+// page box and reflow so nothing is clipped off the bottom.
 window.addEventListener('beforeprint', function () {
   if (_isIOS) {
     document.querySelectorAll('.a4-page').forEach(p => { p.style.height = '287mm'; p.style.maxHeight = '287mm'; });
+    _rebuildActive = true; // suppress MO-triggered reflows during DOM moves
+    const editors = Array.from(document.querySelectorAll('.calc-area'));
+    editors.forEach(edEl => {
+      const contEl = edEl.closest('.pg-content');
+      if (contEl) printReflow(edEl, contEl);
+    });
+    setTimeout(() => { _rebuildActive = false; }, 800);
   }
-  // Pre-flight: at this point print CSS is active so clientHeight/scrollHeight are
-  // print-mode values. Split any page whose content is taller than the print area.
-  _rebuildActive = true; // suppress MO-triggered reflows during DOM moves
-  const editors = Array.from(document.querySelectorAll('.calc-area'));
-  editors.forEach(edEl => {
-    const contEl = edEl.closest('.pg-content');
-    if (contEl) printReflow(edEl, contEl);
-  });
-  setTimeout(() => { _rebuildActive = false; }, 800);
 });
 window.addEventListener('afterprint', function () {
-  document.querySelectorAll('.a4-page').forEach(p => { p.style.height = ''; p.style.maxHeight = ''; });
-  // Rebuild so chips re-render in screen mode after any DOM moves
-  setTimeout(rebuildVars, 50);
+  if (_isIOS) {
+    document.querySelectorAll('.a4-page').forEach(p => { p.style.height = ''; p.style.maxHeight = ''; });
+    setTimeout(rebuildVars, 50); // resync chip rendering after DOM moves
+  }
 });
 
 function triggerPrint() {
