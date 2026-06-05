@@ -309,13 +309,25 @@ body{
   }
   .page-wrap:last-of-type .a4-page{page-break-after:avoid;break-after:avoid}
 
-  /* iOS AirPrint forces its own page margins that we can't zero out (~6.4mm / 0.25"
-     each side on most printers), shrinking the printable area in BOTH dimensions.
-     Instead of reflowing (which would change where pages break), scale each page down
-     uniformly so the exact screen layout fits inside those margins — same page breaks,
-     same line wraps, just rendered a little smaller. WYSIWYG.
-     0.92 leaves enough room that nothing clips on the right or spills to an extra page. */
-  html.ios-print .a4-page{ zoom:0.92; }
+  /* iOS AirPrint ignores @page{margin:0} and its margins are large enough that a
+     full-size page spills onto a second sheet. `zoom` is NOT reliably honored in iOS
+     Safari's print path, so we scale with a `transform` (which IS honored). Because a
+     transform doesn't shrink the element's layout box, we also shrink the box that
+     actually paginates — .page-wrap — to the scaled height, so each page still maps to
+     exactly one sheet. Layout, line wraps and page breaks are unchanged; just smaller. */
+  html.ios-print .a4-page{
+    transform:scale(0.85);
+    transform-origin:top left;
+    page-break-after:auto;
+    break-after:auto;
+  }
+  html.ios-print .page-wrap{
+    height:252mm;            /* 297mm × 0.85 — the scaled flow height that paginates */
+    overflow:hidden;
+    page-break-after:always;
+    break-after:page;
+  }
+  html.ios-print .page-wrap:last-of-type{ page-break-after:avoid;break-after:avoid; }
 
   /* Inner layout intentionally NOT overridden — inherits screen px metrics for WYSIWYG. */
   .calc-table thead{display:table-header-group}
@@ -519,7 +531,7 @@ body{
         <div id="editor" class="calc-area" contenteditable="true" spellcheck="true"
           data-placeholder="Begin calculations… type x = 42 then Enter to define a variable, =x^2+3 then Enter for a formula."></div>
       </div>
-      <div class="pg-footer">Alpha — updated 27.04.26</div>
+      <div class="pg-footer">Alpha — updated 05.06.26</div>
     </div>
 
     <!-- Sidebar (only shown next to page 1) -->
@@ -578,13 +590,9 @@ let editor = document.getElementById('editor');
 let vars = {};
 let varUnits = {};
 
-// Footer "updated" date — computed at load so it always reflects the current date
-// (DD.MM.YY) rather than a stale hardcoded string.
-const _fd = new Date();
-const FOOTER_TEXT = 'Alpha — updated ' +
-  String(_fd.getDate()).padStart(2, '0') + '.' +
-  String(_fd.getMonth() + 1).padStart(2, '0') + '.' +
-  String(_fd.getFullYear()).slice(-2);
+// Footer "updated" date — the date the tool itself was last updated (build date),
+// shown as DD.MM.YY. Bump this whenever the app code changes.
+const FOOTER_TEXT = 'Alpha — updated 05.06.26';
 
 // ── Variable store ─────────────────────────────────────────
 
@@ -2481,10 +2489,10 @@ const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
 // Both Chrome/desktop and iOS print are now WYSIWYG with NO reflow:
 //   • Chrome/desktop: @page{margin:0} works, so each on-screen A4 page = one sheet,
 //     rendered at the exact same px metrics as the screen.
-//   • iOS: AirPrint forces its own margins we can't zero out, so the
-//     `html.ios-print .a4-page{zoom:0.92}` rule scales each page down uniformly to
-//     fit inside them — preserving the exact layout and page breaks, just smaller.
-// The ios-print class is set once at load so the zoom only ever applies in @media print.
+//   • iOS: AirPrint forces its own margins we can't zero out, so the html.ios-print
+//     print rules transform-scale each page to 0.85 and shrink the paginating box to
+//     match — preserving the exact layout and page breaks, just rendered smaller.
+// The ios-print class is set once at load so it only ever takes effect in @media print.
 if (_isIOS) document.documentElement.classList.add('ios-print');
 
 function triggerPrint() {
