@@ -1638,6 +1638,14 @@ function scheduleReflow(edEl, contEl) {
 }
 
 function reflow(edEl, contEl) {
+  // Don't reflow while a formula/variable is being entered or edited. Editing a chip
+  // temporarily expands it from compact KaTeX into longer raw text (=formula [unit]),
+  // which can briefly overflow the page; reflowing then would split the page and yank
+  // the line you're editing onto a new page — an unrecoverable loop. formulaBuffer is
+  // non-null exactly during entry/edit and back to null on commit/cancel, after which
+  // the chip is compact again and a normal reflow runs.
+  if (formulaBuffer !== null) return;
+
   // Temporarily allow overflow so we can measure true content height
   let prevOverflow = edEl.style.overflow;
   edEl.style.overflow = 'visible';
