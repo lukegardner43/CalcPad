@@ -220,7 +220,7 @@ body{
 
 /* ── Page footer ── */
 .pg-footer{flex-shrink:0;padding:5px 26px 10px;text-align:right;
-  font-size:9px;color:var(--mid);border-top:1px solid #ddd;margin-top:4px}
+  font-size:9px;color:var(--mid);margin-top:4px}
 
 /* ── Chips ── */
 .var-def-chip{display:inline-flex;align-items:baseline;font-family:Arial,sans-serif;
@@ -309,11 +309,13 @@ body{
   }
   .page-wrap:last-of-type .a4-page{page-break-after:avoid;break-after:avoid}
 
-  /* iOS AirPrint forces its own page margins that we can't zero out, shrinking the
-     printable area to ~287mm tall. Instead of reflowing (which would change where
-     pages break), scale each page down uniformly so the exact screen layout fits —
-     same page breaks, same line wraps, just rendered slightly smaller. WYSIWYG. */
-  html.ios-print .a4-page{ zoom:0.966; }
+  /* iOS AirPrint forces its own page margins that we can't zero out (~6.4mm / 0.25"
+     each side on most printers), shrinking the printable area in BOTH dimensions.
+     Instead of reflowing (which would change where pages break), scale each page down
+     uniformly so the exact screen layout fits inside those margins — same page breaks,
+     same line wraps, just rendered a little smaller. WYSIWYG.
+     0.92 leaves enough room that nothing clips on the right or spills to an extra page. */
+  html.ios-print .a4-page{ zoom:0.92; }
 
   /* Inner layout intentionally NOT overridden — inherits screen px metrics for WYSIWYG. */
   .calc-table thead{display:table-header-group}
@@ -575,6 +577,14 @@ body{
 let editor = document.getElementById('editor');
 let vars = {};
 let varUnits = {};
+
+// Footer "updated" date — computed at load so it always reflects the current date
+// (DD.MM.YY) rather than a stale hardcoded string.
+const _fd = new Date();
+const FOOTER_TEXT = 'Alpha — updated ' +
+  String(_fd.getDate()).padStart(2, '0') + '.' +
+  String(_fd.getMonth() + 1).padStart(2, '0') + '.' +
+  String(_fd.getFullYear()).slice(-2);
 
 // ── Variable store ─────────────────────────────────────────
 
@@ -1541,7 +1551,7 @@ function addPage() {
   // Footer
   const ftr = document.createElement('div');
   ftr.className = 'pg-footer';
-  ftr.textContent = 'Alpha — updated 27.04.26';
+  ftr.textContent = FOOTER_TEXT;
   page.appendChild(ftr);
 
   wrap.appendChild(page);
@@ -1700,6 +1710,7 @@ function reflow(edEl, contEl) {
 // ── Init ──────────────────────────────────────────────────────
 document.getElementById('m-date').value = new Date().toLocaleDateString('en-GB');
 document.getElementById('m-sheet').value = '1';
+document.querySelectorAll('.pg-footer').forEach(f => { f.textContent = FOOTER_TEXT; });
 
 // Wait for layout then set heights
 requestAnimationFrame(() => {
@@ -2470,9 +2481,9 @@ const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
 // Both Chrome/desktop and iOS print are now WYSIWYG with NO reflow:
 //   • Chrome/desktop: @page{margin:0} works, so each on-screen A4 page = one sheet,
 //     rendered at the exact same px metrics as the screen.
-//   • iOS: AirPrint forces its own margins (printable area ~287mm tall), so the
-//     `html.ios-print .a4-page{zoom:0.966}` rule scales each page down uniformly to
-//     fit — preserving the exact layout and page breaks, just slightly smaller.
+//   • iOS: AirPrint forces its own margins we can't zero out, so the
+//     `html.ios-print .a4-page{zoom:0.92}` rule scales each page down uniformly to
+//     fit inside them — preserving the exact layout and page breaks, just smaller.
 // The ios-print class is set once at load so the zoom only ever applies in @media print.
 if (_isIOS) document.documentElement.classList.add('ios-print');
 
