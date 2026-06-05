@@ -1278,6 +1278,7 @@ function startEditFormulaChip(chip) {
 
 function startEditVarDefChip(chip) {
   formulaBuffer = null;
+  _editingVarDef = true;
   const name = chip.dataset.varName;
   const expr = chip.dataset.varExpr || chip.dataset.varOrigNum || chip.dataset.varVal;
   const unit = chip.dataset.varUnit || '';
@@ -1363,6 +1364,11 @@ const VAR_RE = /^([a-zA-Z][a-zA-Z0-9_]*)\s*=(?!=)\s*(.+)$/;
 // Greedy .* ensures the variable name is the LAST identifier before =.
 const VAR_DESC_RE = /^(.*\s)([a-zA-Z][a-zA-Z0-9_]*)\s*=(?!=)\s*(.+)$/;
 let formulaBuffer = null;
+// True while a variable-definition chip is expanded to editable text (double/tap to
+// edit). Mirrors formulaBuffer's role for formulas so reflow is suppressed during the
+// edit. Self-heals: cleared on commit, and in the input handler once the caret leaves
+// the "name = …" text being edited.
+let _editingVarDef = false;
 
 
 
@@ -1642,9 +1648,10 @@ function reflow(edEl, contEl) {
   // temporarily expands it from compact KaTeX into longer raw text (=formula [unit]),
   // which can briefly overflow the page; reflowing then would split the page and yank
   // the line you're editing onto a new page — an unrecoverable loop. formulaBuffer is
-  // non-null exactly during entry/edit and back to null on commit/cancel, after which
-  // the chip is compact again and a normal reflow runs.
-  if (formulaBuffer !== null) return;
+  // non-null exactly during formula entry/edit; _editingVarDef covers variable-chip
+  // edits. Both clear on commit/cancel, after which the chip is compact again and a
+  // normal reflow runs.
+  if (formulaBuffer !== null || _editingVarDef) return;
 
   // Temporarily allow overflow so we can measure true content height
   let prevOverflow = edEl.style.overflow;
@@ -1867,6 +1874,8 @@ document.addEventListener('keydown', e => {
     if (e.key === 'Escape') { e.preventDefault(); cancelFormula(); return; }
     return;
   }
+  // Escape abandons a variable-chip edit: re-enable reflow (text stays as typed).
+  if (_editingVarDef && e.key === 'Escape') { _editingVarDef = false; }
   if (e.key === 'Enter') {
     const sel = window.getSelection();
     if (!sel.rangeCount) return;
@@ -1925,6 +1934,14 @@ document.addEventListener('input', e => {
   isDirty = true; autoSave();
   clearTimeout(_rebuildTimer);
   _rebuildTimer = setTimeout(rebuildVars, 300);
+  // Self-heal the var-def edit guard: once the caret is no longer in a "name = …"
+  // text node, the edit is over (committed or abandoned) so re-enable reflow.
+  if (_editingVarDef) {
+    const sel = window.getSelection();
+    const node = sel.rangeCount ? sel.getRangeAt(0).startContainer : null;
+    const t = node && node.nodeType === Node.TEXT_NODE ? node.textContent : '';
+    if (!/[a-zA-Z][a-zA-Z0-9_]*\s*=/.test(t)) _editingVarDef = false;
+  }
   if (formulaBuffer !== null) {
     const sel = window.getSelection();
     if (!sel.rangeCount) return;
@@ -2039,6 +2056,7 @@ document.addEventListener('dblclick', e => {
 });
 
 function commitVarDef(textNode, name, val, expr, prefix, unit, siUnit, displayUnit) {
+  _editingVarDef = false;
   const parent = textNode.parentNode;
   const frag = document.createDocumentFragment();
   if (prefix) frag.appendChild(document.createTextNode(prefix));
