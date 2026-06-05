@@ -299,7 +299,7 @@ body{
   .page-stack{margin:0;gap:0;display:block}
   .page-wrap{display:block;position:static}
 
-  /* Each .a4-page = exactly one printed sheet. iOS overrides height via JS beforeprint. */
+  /* Each .a4-page = exactly one printed sheet (iOS scales it down via the rule below). */
   .a4-page{
     width:210mm;height:297mm;max-height:297mm;
     box-shadow:none;
@@ -308,6 +308,12 @@ body{
     break-after:page;
   }
   .page-wrap:last-of-type .a4-page{page-break-after:avoid;break-after:avoid}
+
+  /* iOS AirPrint forces its own page margins that we can't zero out, shrinking the
+     printable area to ~287mm tall. Instead of reflowing (which would change where
+     pages break), scale each page down uniformly so the exact screen layout fits —
+     same page breaks, same line wraps, just rendered slightly smaller. WYSIWYG. */
+  html.ios-print .a4-page{ zoom:0.966; }
 
   /* Inner layout intentionally NOT overridden — inherits screen px metrics for WYSIWYG. */
   .calc-table thead{display:table-header-group}
@@ -1691,55 +1697,6 @@ function reflow(edEl, contEl) {
   rebuildVars();
 }
 
-// Lightweight reflow for print pre-flight — called in beforeprint when print CSS is
-// already active, so clientHeight and scrollHeight are print-mode values.
-// Does not call rebuildVars/scheduleReflow to avoid side-effects during printing.
-function printReflow(edEl, contEl) {
-  let prevOverflow = edEl.style.overflow;
-  edEl.style.overflow = 'visible';
-  const trueScrollH = edEl.scrollHeight;
-  edEl.style.overflow = prevOverflow;
-
-  const maxH = contEl.clientHeight;
-  if (trueScrollH <= maxH) return;
-
-  let rawId = edEl.id.replace('editor', '');
-  const edIdx = rawId === '' ? 0 : parseInt(rawId);
-  const nextEdId = 'editor' + (edIdx + 1);
-  let nextEdEl = document.getElementById(nextEdId);
-  if (!nextEdEl) nextEdEl = addPage();
-  const nextContEl = nextEdEl.closest('.pg-content');
-
-  edEl.style.overflow = 'visible';
-  const children = Array.from(edEl.childNodes);
-  let splitIndex = children.length;
-  for (let i = 0; i < children.length; i++) {
-    const node = children[i];
-    let nodeBottom = 0;
-    if (node.nodeType === Node.ELEMENT_NODE) {
-      nodeBottom = node.offsetTop + node.offsetHeight;
-    } else if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
-      const r = document.createRange();
-      r.selectNode(node);
-      const rect = r.getBoundingClientRect();
-      const edRect = edEl.getBoundingClientRect();
-      nodeBottom = rect.bottom - edRect.top;
-    } else { continue; }
-    if (nodeBottom > maxH) { splitIndex = i; break; }
-  }
-  edEl.style.overflow = prevOverflow;
-
-  if (splitIndex === 0 || splitIndex === children.length) return;
-
-  const overflow = children.slice(splitIndex);
-  const frag = document.createDocumentFragment();
-  overflow.forEach(n => frag.appendChild(n));
-  if (nextEdEl.firstChild) nextEdEl.insertBefore(frag, nextEdEl.firstChild);
-  else nextEdEl.appendChild(frag);
-
-  printReflow(nextEdEl, nextContEl);
-}
-
 // ── Init ──────────────────────────────────────────────────────
 document.getElementById('m-date').value = new Date().toLocaleDateString('en-GB');
 document.getElementById('m-sheet').value = '1';
@@ -2510,31 +2467,14 @@ async function exportWord() {
 const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
-// Chrome/desktop print is now WYSIWYG: print CSS uses the same px metrics as the
-// screen, so each on-screen A4 page maps to exactly one printed sheet and the page
-// count matches what you see — no pre-flight reflow needed.
-//
-// iOS AirPrint is the exception: it ignores @page margin:0 and adds ~5mm system
-// margins each side, shrinking the usable height to ~287mm. There we shrink the
-// page box and reflow so nothing is clipped off the bottom.
-window.addEventListener('beforeprint', function () {
-  if (_isIOS) {
-    document.querySelectorAll('.a4-page').forEach(p => { p.style.height = '287mm'; p.style.maxHeight = '287mm'; });
-    _rebuildActive = true; // suppress MO-triggered reflows during DOM moves
-    const editors = Array.from(document.querySelectorAll('.calc-area'));
-    editors.forEach(edEl => {
-      const contEl = edEl.closest('.pg-content');
-      if (contEl) printReflow(edEl, contEl);
-    });
-    setTimeout(() => { _rebuildActive = false; }, 800);
-  }
-});
-window.addEventListener('afterprint', function () {
-  if (_isIOS) {
-    document.querySelectorAll('.a4-page').forEach(p => { p.style.height = ''; p.style.maxHeight = ''; });
-    setTimeout(rebuildVars, 50); // resync chip rendering after DOM moves
-  }
-});
+// Both Chrome/desktop and iOS print are now WYSIWYG with NO reflow:
+//   • Chrome/desktop: @page{margin:0} works, so each on-screen A4 page = one sheet,
+//     rendered at the exact same px metrics as the screen.
+//   • iOS: AirPrint forces its own margins (printable area ~287mm tall), so the
+//     `html.ios-print .a4-page{zoom:0.966}` rule scales each page down uniformly to
+//     fit — preserving the exact layout and page breaks, just slightly smaller.
+// The ios-print class is set once at load so the zoom only ever applies in @media print.
+if (_isIOS) document.documentElement.classList.add('ios-print');
 
 function triggerPrint() {
   if (_isIOS) { window.print(); return; }
