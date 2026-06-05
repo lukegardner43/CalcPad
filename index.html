@@ -71,9 +71,6 @@ body{
 .hpill{font-size:10px;color:var(--mid);background:#fafafa;border:1px solid #ddd;
   border-left:2px solid var(--rubine);padding:2px 7px;border-radius:2px}
 .hpill code{color:var(--purple);background:#eceaf8;padding:0 3px;border-radius:1px;font-size:10px}
-.ios-scale-dbg{display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--mid);
-  background:#fff7e6;border:1px solid #f0c674;border-radius:3px;padding:2px 6px;height:26px}
-.ios-scale-dbg input{width:48px;font-size:11px;padding:1px 3px;border:1px solid #ddd;border-radius:2px}
 
 /* File menu */
 .file-menu-wrap{position:relative;display:inline-block}
@@ -319,13 +316,13 @@ body{
      actually paginates — .page-wrap — to the scaled height, so each page still maps to
      exactly one sheet. Layout, line wraps and page breaks are unchanged; just smaller. */
   html.ios-print .a4-page{
-    transform:scale(var(--ios-print-scale,0.85));
+    transform:scale(0.78);
     transform-origin:top left;
     page-break-after:auto;
     break-after:auto;
   }
   html.ios-print .page-wrap{
-    height:calc(297mm * var(--ios-print-scale,0.85)); /* scaled flow height that paginates */
+    height:calc(297mm * 0.78); /* 231.66mm — scaled flow height that paginates */
     overflow:hidden;
     page-break-after:always;
     break-after:page;
@@ -472,12 +469,6 @@ body{
     <svg viewBox="0 0 16 16" style="width:13px;height:13px"><path d="M4 1.5h8v3.5H4V1.5zm-2 4h12c.55 0 1 .45 1 1v4.5c0 .55-.45 1-1 1H13v3H3v-3H2c-.55 0-1-.45-1-1V6.5c0-.55.45-1 1-1zm1 1.5c-.41 0-.75.34-.75.75s.34.75.75.75.75-.34.75-.75S3.41 7 3 7zM5 11.5h6V14H5v-2.5z" fill="white"/></svg>
     Print
   </button>
-  <!-- DEBUG: iOS print scale tuner. Adjust, print, find the value that fits one sheet. -->
-  <label class="ios-scale-dbg" title="iOS print scale (debug)">
-    iOS&nbsp;scale
-    <input type="number" id="iosScaleInput" min="0.5" max="1" step="0.01" value="0.85"
-           oninput="setIosPrintScale(this.value)">
-  </label>
   <div class="hints">
     <div class="hpill"><code>x = 42</code> + Enter → variable</div>
     <div class="hpill"><code>=x^2+3</code> + Enter → formula</div>
@@ -2499,29 +2490,11 @@ const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
 //   • Chrome/desktop: @page{margin:0} works, so each on-screen A4 page = one sheet,
 //     rendered at the exact same px metrics as the screen.
 //   • iOS: AirPrint forces its own margins we can't zero out, so the html.ios-print
-//     print rules transform-scale each page to 0.85 and shrink the paginating box to
+//     print rules transform-scale each page to 0.78 and shrink the paginating box to
 //     match — preserving the exact layout and page breaks, just rendered smaller.
 // The ios-print class is set once at load so it only ever takes effect in @media print.
 if (_isIOS) document.documentElement.classList.add('ios-print');
 
-// DEBUG: live iOS print-scale tuner. Drives the --ios-print-scale CSS var that both
-// the transform and the .page-wrap flow height read. Persisted so it survives the
-// navigation into the print sheet. Adjust on screen, print, find the value that fits.
-function setIosPrintScale(v) {
-  const s = parseFloat(v);
-  if (!isFinite(s) || s <= 0) return;
-  document.documentElement.style.setProperty('--ios-print-scale', s);
-  try { localStorage.setItem('iosPrintScale', String(s)); } catch (e) {}
-}
-(function initIosPrintScale() {
-  let saved;
-  try { saved = localStorage.getItem('iosPrintScale'); } catch (e) {}
-  if (saved) {
-    document.documentElement.style.setProperty('--ios-print-scale', saved);
-    const inp = document.getElementById('iosScaleInput');
-    if (inp) inp.value = saved;
-  }
-})();
 
 function triggerPrint() {
   if (_isIOS) { window.print(); return; }
