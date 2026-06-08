@@ -1387,6 +1387,25 @@ document.addEventListener('focusin', e => {
   if (ca) setActiveEditor(ca);
 });
 
+// The editable area fills the page down to the footer so the whole page is clickable.
+// Clicking the empty space below the text would otherwise drop the caret at the editor's
+// container root, which the browser renders at the bottom-left corner — clashing with the
+// page border. Redirect that click to the end of the actual content instead (Word-like).
+document.addEventListener('mousedown', e => {
+  if (e.target.classList && e.target.classList.contains('calc-area')) {
+    e.preventDefault();
+    const ed = e.target;
+    ed.focus();
+    setActiveEditor(ed);
+    const range = document.createRange();
+    range.selectNodeContents(ed);
+    range.collapse(false);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+});
+
 // ── Page management ────────────────────────────────────────────
 let pageCount = 1;
 
@@ -1935,6 +1954,34 @@ formulaBuffer = null;
 document.addEventListener('keydown', e => {
   let ed = getActiveEditor();
   if (!ed) return;
+
+  // Backspace/Delete on an empty page (2+) removes the page — like deleting a blank
+  // page in Word — and moves the cursor to the end of the previous page.
+  if (e.key === 'Backspace' || e.key === 'Delete') {
+    const wrap = ed.closest('.page-wrap');
+    const prevWrap = wrap && wrap.previousElementSibling;
+    const isEmpty = !ed.textContent.trim() &&
+      !ed.querySelector('img, .calc-img-wrap, table, .formula-chip, .var-def-chip');
+    if (isEmpty && prevWrap && prevWrap.classList.contains('page-wrap')) {
+      e.preventDefault();
+      const prevEd = prevWrap.querySelector('.calc-area');
+      wrap.remove();
+      pageCount = Math.max(1, pageCount - 1);
+      if (prevEd) {
+        prevEd.focus();
+        setActiveEditor(prevEd);
+        const range = document.createRange();
+        range.selectNodeContents(prevEd);
+        range.collapse(false);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+      rebuildVars();
+      return;
+    }
+  }
+
   if (formulaBuffer !== null) {
     if (e.key === 'Enter') { e.preventDefault(); commitFormula(ed); return; }
     if (e.key === 'Escape') { e.preventDefault(); cancelFormula(); return; }
