@@ -1730,6 +1730,81 @@ function splitNodeAtHeight(node, maxH, edTop) {
   return null;
 }
 
+// Pull content back from the next page when the current page has room.
+// Called by reflow() when scrollHeight <= maxH.
+function pullBackFromNext(edEl, contEl) {
+  let rawId = edEl.id.replace('editor', '');
+  const edIdx = rawId === '' ? 0 : parseInt(rawId);
+  const nextEdEl = document.getElementById('editor' + (edIdx + 1));
+  if (!nextEdEl || !nextEdEl.hasChildNodes()) return;
+  const nextContEl = nextEdEl.closest('.pg-content');
+
+  const maxH = contEl.clientHeight;
+  let pulled = false;
+
+  while (nextEdEl.firstChild) {
+    const node = nextEdEl.firstChild;
+    const lastChild = edEl.lastChild;
+
+    // If the first node on the next page and the last node on this page share the
+    // same tag + class, they were probably split by splitNodeAtHeight — try merging
+    // them first so a split paragraph reunites cleanly rather than leaving two divs.
+    const canMerge = node.nodeType === Node.ELEMENT_NODE &&
+                     lastChild && lastChild.nodeType === Node.ELEMENT_NODE &&
+                     node.tagName === lastChild.tagName &&
+                     node.className === lastChild.className;
+    const origChildCount = canMerge ? lastChild.childNodes.length : 0;
+
+    if (canMerge) {
+      while (node.firstChild) lastChild.appendChild(node.firstChild);
+      node.remove();
+    } else {
+      edEl.appendChild(node);
+    }
+
+    edEl.style.overflow = 'visible';
+    const fits = edEl.scrollHeight <= maxH;
+    edEl.style.overflow = 'hidden';
+
+    if (fits) {
+      pulled = true;
+    } else {
+      // Doesn't fit — undo the move/merge and stop.
+      if (canMerge) {
+        const restored = lastChild.cloneNode(false);
+        const kids = Array.from(lastChild.childNodes);
+        for (let i = origChildCount; i < kids.length; i++) restored.appendChild(kids[i]);
+        nextEdEl.insertBefore(restored, nextEdEl.firstChild);
+      } else {
+        nextEdEl.insertBefore(node, nextEdEl.firstChild);
+      }
+      break;
+    }
+  }
+
+  // Merge adjacent text nodes that a previous splitText() may have left adjacent.
+  if (pulled) edEl.normalize();
+
+  // If the next page is now empty, remove it automatically.
+  const nextIsEmpty = !nextEdEl.hasChildNodes() ||
+    (!nextEdEl.textContent.trim() &&
+     !nextEdEl.querySelector('img,.calc-img-wrap,.formula-chip,.var-def-chip'));
+
+  if (nextIsEmpty) {
+    const nextWrap = nextEdEl.closest('.page-wrap');
+    if (nextWrap) {
+      nextWrap.remove();
+      pageCount = Math.max(1, pageCount - 1);
+    }
+  } else if (pulled) {
+    // Next page still has content — cascade: it may now have room to pull from its
+    // own next page, or it may have overflow that needs pushing.
+    scheduleReflow(nextEdEl, nextContEl);
+  }
+
+  if (pulled) rebuildVars();
+}
+
 function reflow(edEl, contEl) {
   // Don't reflow while a formula/variable is being entered or edited. Editing a chip
   // temporarily expands it from compact KaTeX into longer raw text (=formula [unit]),
@@ -1745,7 +1820,11 @@ function reflow(edEl, contEl) {
   edEl.style.overflow = 'visible';
 
   const maxH = contEl.clientHeight;
-  if (edEl.scrollHeight <= maxH) { edEl.style.overflow = prevOverflow; return; }
+  if (edEl.scrollHeight <= maxH) {
+    edEl.style.overflow = prevOverflow;
+    pullBackFromNext(edEl, contEl); // absorb content from the next page if there is room
+    return;
+  }
 
   // Find the page index for this editor
   let rawId = edEl.id.replace('editor', '');
