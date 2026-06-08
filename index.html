@@ -1644,6 +1644,73 @@ function scheduleReflow(edEl, contEl) {
   reflowDebounce.set(key, setTimeout(() => reflow(edEl, contEl), 100));
 }
 
+// Position of a node's top/bottom edge relative to the editor's top edge.
+// Returns null for empty/whitespace-only text nodes (nothing to measure).
+function nodeEdges(node, edTop) {
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    const r = node.getBoundingClientRect();
+    return { top: r.top - edTop, bottom: r.bottom - edTop };
+  }
+  if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
+    const range = document.createRange();
+    range.selectNode(node);
+    const r = range.getBoundingClientRect();
+    return { top: r.top - edTop, bottom: r.bottom - edTop };
+  }
+  return null;
+}
+
+// Find the character offset in a text node where its rendered text first crosses
+// maxH, snapped back to a word boundary so words aren't cut in half.
+function findTextSplitOffset(node, maxH, edTop) {
+  const len = node.textContent.length;
+  const r = document.createRange();
+  let lo = 0, hi = len, best = 0;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    r.setStart(node, 0);
+    r.setEnd(node, mid);
+    const bottom = r.getBoundingClientRect().bottom - edTop;
+    if (bottom <= maxH) { best = mid; lo = mid + 1; }
+    else { hi = mid - 1; }
+  }
+  // Snap back to the start of the overflowing word (previous whitespace).
+  const txt = node.textContent;
+  let off = best;
+  while (off > 0 && !/\s/.test(txt[off - 1])) off--;
+  return off > 0 ? off : best; // if no whitespace, hard-split at the line break
+}
+
+// Split `node` so the portion below maxH is returned (detached) for moving to the
+// next page, while the portion above maxH stays in place. Returns null if nothing
+// needs to move, or the whole node if it can't be split (atomic element below maxH).
+function splitNodeAtHeight(node, maxH, edTop) {
+  if (node.nodeType === Node.TEXT_NODE) {
+    const off = findTextSplitOffset(node, maxH, edTop);
+    if (off <= 0) return node;                       // whole text moves
+    if (off >= node.textContent.length) return null; // nothing moves
+    return node.splitText(off);                       // tail (now a sibling) moves
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) return null;
+  // Atomic blocks can't be split internally — caller moves them whole.
+  if (node.matches && node.matches('img, .calc-img-wrap, .formula-chip, .var-def-chip'))
+    return null;
+
+  const kids = Array.from(node.childNodes);
+  for (let i = 0; i < kids.length; i++) {
+    const edges = nodeEdges(kids[i], edTop);
+    if (!edges || edges.bottom <= maxH) continue;
+    // This child crosses the boundary. Split it if it straddles, else move it whole.
+    let moved = null;
+    if (edges.top < maxH - 2) moved = splitNodeAtHeight(kids[i], maxH, edTop);
+    const clone = node.cloneNode(false); // preserve wrapper tag + attributes/styling
+    clone.appendChild(moved && moved !== kids[i] ? moved : kids[i]);
+    for (let j = i + 1; j < kids.length; j++) clone.appendChild(kids[j]);
+    return clone;
+  }
+  return null;
+}
+
 function reflow(edEl, contEl) {
   // Don't reflow while a formula/variable is being entered or edited. Editing a chip
   // temporarily expands it from compact KaTeX into longer raw text (=formula [unit]),
@@ -1654,14 +1721,12 @@ function reflow(edEl, contEl) {
   // normal reflow runs.
   if (formulaBuffer !== null || _editingVarDef || _editCommitPending) return;
 
-  // Temporarily allow overflow so we can measure true content height
-  let prevOverflow = edEl.style.overflow;
+  // Temporarily allow overflow so we can measure true content height + node positions.
+  const prevOverflow = edEl.style.overflow;
   edEl.style.overflow = 'visible';
-  const trueScrollH = edEl.scrollHeight;
-  edEl.style.overflow = prevOverflow;
 
   const maxH = contEl.clientHeight;
-  if (trueScrollH <= maxH) return;
+  if (edEl.scrollHeight <= maxH) { edEl.style.overflow = prevOverflow; return; }
 
   // Find the page index for this editor
   let rawId = edEl.id.replace('editor', '');
@@ -1680,27 +1745,20 @@ function reflow(edEl, contEl) {
     try { if (edEl.contains(sel.getRangeAt(0).startContainer)) savedRange = sel.getRangeAt(0).cloneRange(); } catch(e) {}
   }
 
-  // Temporarily remove overflow:hidden so offsetTop measurements are real
-  edEl.style.overflow = 'visible';
-
+  // Find the first child that crosses the page boundary. If it straddles the
+  // boundary (starts on this page but extends past it), split it at the line that
+  // overflows instead of moving the whole node — otherwise a long paragraph would
+  // jump to the next page from a seemingly random point.
+  const edTop = edEl.getBoundingClientRect().top;
   const children = Array.from(edEl.childNodes);
-  let splitIndex = children.length;
+  let splitIndex = -1;
+  let tailNode = null;
 
   for (let i = 0; i < children.length; i++) {
-    const node = children[i];
-    let nodeBottom = 0;
-    if (node.nodeType === Node.ELEMENT_NODE) {
-      nodeBottom = node.offsetTop + node.offsetHeight;
-    } else if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
-      const r = document.createRange();
-      r.selectNode(node);
-      const rect = r.getBoundingClientRect();
-      const edRect = edEl.getBoundingClientRect();
-      nodeBottom = rect.bottom - edRect.top;
-    } else {
-      continue;
-    }
-    if (nodeBottom > maxH) {
+    const edges = nodeEdges(children[i], edTop);
+    if (!edges) continue;
+    if (edges.bottom > maxH) {
+      if (edges.top < maxH - 2) tailNode = splitNodeAtHeight(children[i], maxH, edTop);
       splitIndex = i;
       break;
     }
@@ -1708,11 +1766,18 @@ function reflow(edEl, contEl) {
 
   edEl.style.overflow = prevOverflow;
 
-  if (splitIndex === 0 || splitIndex === children.length) return;
+  if (splitIndex === -1) return;
+  if (splitIndex === 0 && !tailNode) return; // first node overflows and can't split
 
-  const overflow = children.slice(splitIndex);
+  // Assemble the fragment to move: the split-off tail (if any) plus all later siblings.
   const frag = document.createDocumentFragment();
-  overflow.forEach(n => frag.appendChild(n));
+  if (tailNode) {
+    frag.appendChild(tailNode);
+    for (let j = splitIndex + 1; j < children.length; j++) frag.appendChild(children[j]);
+  } else {
+    for (let j = splitIndex; j < children.length; j++) frag.appendChild(children[j]);
+  }
+  if (!frag.childNodes.length) return;
 
   if (nextEdEl.firstChild) nextEdEl.insertBefore(frag, nextEdEl.firstChild);
   else nextEdEl.appendChild(frag);
