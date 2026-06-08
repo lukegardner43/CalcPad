@@ -1369,6 +1369,7 @@ let formulaBuffer = null;
 // edit. Self-heals: cleared on commit, and in the input handler once the caret leaves
 // the "name = …" text being edited.
 let _editingVarDef = false;
+let _editCommitPending = false; // suppresses reflow for 500ms after commit/cancel
 
 
 
@@ -1651,7 +1652,7 @@ function reflow(edEl, contEl) {
   // non-null exactly during formula entry/edit; _editingVarDef covers variable-chip
   // edits. Both clear on commit/cancel, after which the chip is compact again and a
   // normal reflow runs.
-  if (formulaBuffer !== null || _editingVarDef) return;
+  if (formulaBuffer !== null || _editingVarDef || _editCommitPending) return;
 
   // Temporarily allow overflow so we can measure true content height
   let prevOverflow = edEl.style.overflow;
@@ -1940,7 +1941,10 @@ document.addEventListener('input', e => {
     const sel = window.getSelection();
     const node = sel.rangeCount ? sel.getRangeAt(0).startContainer : null;
     const t = node && node.nodeType === Node.TEXT_NODE ? node.textContent : '';
-    if (!/[a-zA-Z][a-zA-Z0-9_]*\s*=/.test(t)) _editingVarDef = false;
+    if (!/[a-zA-Z][a-zA-Z0-9_]*\s*=/.test(t)) {
+      _editingVarDef = false;
+      _editCommitPending = true; setTimeout(() => { _editCommitPending = false; }, 500);
+    }
   }
   if (formulaBuffer !== null) {
     const sel = window.getSelection();
@@ -1964,6 +1968,23 @@ document.addEventListener('input', e => {
       if (pos <= 1 || before === ' ' || before === '\n' || before === '\u00A0')
         formulaBuffer = '';
     }
+  }
+});
+
+// Tap-away guard: when cursor leaves the active edit text node (iOS "Done", click away),
+// treat it as implicit cancel and block reflow for 500ms.
+document.addEventListener('selectionchange', () => {
+  if (formulaBuffer === null && !_editingVarDef) return;
+  const sel = window.getSelection();
+  const node = sel.rangeCount ? sel.getRangeAt(0).startContainer : null;
+  const t = node && node.nodeType === Node.TEXT_NODE ? node.textContent : '';
+  const inFormulaEdit = formulaBuffer !== null && t.indexOf('=') !== -1;
+  const inVarEdit = _editingVarDef && /[a-zA-Z][a-zA-Z0-9_]*\s*=/.test(t);
+  if (!inFormulaEdit && !inVarEdit) {
+    formulaBuffer = null;
+    _editingVarDef = false;
+    _editCommitPending = true;
+    setTimeout(() => { _editCommitPending = false; }, 500);
   }
 });
 
@@ -2014,6 +2035,7 @@ function commitFormula(ed) {
       r.setStartAfter(spacer); r.collapse(true);
       sel.removeAllRanges(); sel.addRange(r);
       formulaBuffer = null;
+      _editCommitPending = true; setTimeout(() => { _editCommitPending = false; }, 500);
       rebuildVars();
       return;
     }
@@ -2033,9 +2055,13 @@ function commitFormula(ed) {
   r.setStartAfter(spacer); r.collapse(true);
   sel.removeAllRanges(); sel.addRange(r);
   formulaBuffer = null;
+  _editCommitPending = true; setTimeout(() => { _editCommitPending = false; }, 500);
 }
 
-function cancelFormula() { formulaBuffer = null; }
+function cancelFormula() {
+  formulaBuffer = null;
+  _editCommitPending = true; setTimeout(() => { _editCommitPending = false; }, 500);
+}
 
 // Click a formula chip to expand it back to editable text
 document.addEventListener('click', e => {
@@ -2057,6 +2083,7 @@ document.addEventListener('dblclick', e => {
 
 function commitVarDef(textNode, name, val, expr, prefix, unit, siUnit, displayUnit) {
   _editingVarDef = false;
+  _editCommitPending = true; setTimeout(() => { _editCommitPending = false; }, 500);
   const parent = textNode.parentNode;
   const frag = document.createDocumentFragment();
   if (prefix) frag.appendChild(document.createTextNode(prefix));
