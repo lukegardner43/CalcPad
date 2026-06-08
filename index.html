@@ -279,6 +279,12 @@ body{
 .sref-t{font-size:9px;color:var(--rubine);text-transform:uppercase;letter-spacing:.07em;font-weight:700;margin-bottom:5px}
 .sref-i{font-size:9.5px;color:var(--mid);padding:1px 0;font-family:"Courier New",monospace}
 .sref-i span{color:var(--dark)}
+/* ── Unit preference panel ── */
+.supref-row{display:flex;align-items:center;padding:3px 6px;border-bottom:1px solid #f0eef8}
+.supref-lbl{font-size:9.5px;color:var(--mid);flex:1}
+.supref-sel{font-size:9.5px;border:1px solid #d0c8e8;border-radius:3px;padding:1px 2px;
+  background:#fff;color:var(--dark);cursor:pointer;max-width:64px;font-family:Arial,sans-serif}
+.supref-sel:focus{outline:none;border-color:var(--purple)}
 
 /* ══════════════════ PRINT ══════════════════
    WYSIWYG: each .a4-page prints as exactly one A4 sheet.
@@ -538,6 +544,10 @@ body{
     <div class="sidebar">
       <div class="sh"><span class="st">Variables</span><span class="sc" id="vsCount">0</span></div>
       <div class="sb" id="vsList"><div class="se" id="vsEmpty">Type <code>x = 42</code><br>then Enter to define</div></div>
+      <div class="sref" id="unitPrefPanel">
+        <div class="sref-t">Default Units</div>
+        <!-- rows injected by buildUnitPrefPanel() -->
+      </div>
       <div class="sref">
         <div class="sref-t">Functions</div>
         <div class="sref-i"><span>=SUM(a,b,…)</span></div>
@@ -590,6 +600,18 @@ let editor = document.getElementById('editor');
 let vars = {};
 let varUnits = {};
 
+// ── Preferred display units ────────────────────────────────
+// Groups define the per-dimension unit choice (dropdown options + SI base key).
+// preferredUnits maps SI base symbol → user-chosen display symbol.
+const UNIT_PREF_GROUPS = [
+  { label: 'Length',   si: 'm',   opts: ['mm','cm','m','km'] },
+  { label: 'Force',    si: 'N',   opts: ['N','kN','MN'] },
+  { label: 'Mass',     si: 'kg',  opts: ['g','kg','t'] },
+  { label: 'Pressure', si: 'Pa',  opts: ['Pa','kPa','MPa','GPa'] },
+  { label: 'Time',     si: 's',   opts: ['s','ms','min','hr'] },
+];
+let preferredUnits = { m: 'm', N: 'N', kg: 'kg', Pa: 'Pa', s: 's' }; // defaults = SI
+
 // Footer "updated" date — the date the tool itself was last updated (build date),
 // shown as DD.MM.YY. Bump this whenever the app code changes.
 const FOOTER_TEXT = 'Alpha — updated 05.06.26';
@@ -611,6 +633,7 @@ function renderSidebar() {
     if (chip) {
       const du = chip.dataset.varDisplayUnit || chip.dataset.varUnit || '';
       if (du) {
+        // Explicit unit on chip — use it directly
         unit = du;
         const origNum = chip.dataset.varOrigNum;
         if (origNum) {
@@ -618,6 +641,19 @@ function renderSidebar() {
         } else {
           const f = getUnitConversionFactor(parseUnitStr(du));
           dispVal = fmtNum(f !== null ? vars[name] / f : vars[name]);
+        }
+      } else if (chip.dataset.varExpr) {
+        // No explicit unit — apply preferred units based on auto-detected dimension
+        const exprUnit = evalUnitExpr(chip.dataset.varExpr, varUnits);
+        if (exprUnit && Object.keys(exprUnit).length) {
+          const simplName = simplifyUnitStr(exprUnit);
+          const siBaseObj = simplName ? parseUnitStr(simplName) : unitObjToSIBase(exprUnit);
+          const prefObj   = applyUnitPreferences(siBaseObj);
+          const f = getUnitConversionFactor(prefObj);
+          if (f !== null) {
+            unit = unitObjToStr(prefObj);
+            dispVal = fmtNum(vars[name] / f);
+          }
         }
       }
     }
@@ -859,6 +895,21 @@ function unitObjToStr(u) {
   if (neg.length) str += '/' + neg.map(fmt).join('*');
   return str;
 }
+// Apply user's preferred display units to a compound SI-base unit object.
+// Input:  {N:1, m:-2}  (SI base symbols)
+// Output: {kN:1, m:-2} (preferred display symbols, e.g. when kN preferred for N)
+// Each SI base in the object is replaced by its preferred symbol; exponents are preserved.
+function applyUnitPreferences(siBaseObj) {
+  if (!siBaseObj || !Object.keys(siBaseObj).length) return siBaseObj;
+  const out = {};
+  for (const [si, exp] of Object.entries(siBaseObj)) {
+    const pref = preferredUnits[si] || si;
+    out[pref] = (out[pref] || 0) + exp;
+    if (!out[pref]) delete out[pref];
+  }
+  return out;
+}
+
 // Returns the total conversion factor for a compound unit-object, or null if any symbol is unknown.
 function getUnitConversionFactor(unitObj) {
   if (!unitObj || !Object.keys(unitObj).length) return null;
@@ -1137,11 +1188,15 @@ function renderVarChipContent(chip) {
     } else {
       if (exprUnit && Object.keys(exprUnit).length) {
         const simplName = simplifyUnitStr(exprUnit);
-        exprUnitSuffix = unitObjToLatex(simplName ? parseUnitStr(simplName) : exprUnit);
+        const siBaseObj = simplName ? parseUnitStr(simplName) : unitObjToSIBase(exprUnit);
+        const prefObj   = applyUnitPreferences(siBaseObj);
+        const prefFactor = getUnitConversionFactor(prefObj);
+        displayValStr = fmtNumDisplay(prefFactor !== null ? val / prefFactor : val);
+        exprUnitSuffix = unitObjToLatex(prefObj);
       } else {
         exprUnitSuffix = unit ? unitToLatex(unit) : '';
+        displayValStr = fmtNumDisplay(val);
       }
-      displayValStr = fmtNumDisplay(val);
     }
     try {
       const latexExpr = toLatex(expr);
@@ -1332,11 +1387,15 @@ function setFormulaContent(chip, formula, result, isError) {
       displayVal = fmtNumDisplay(factor !== null ? rawSI / factor : rawSI);
       unitSuffix = unitToLatex(outputUnit);
     } else {
-      displayVal = fmtNumDisplay(rawSI);
       if (resUnit && Object.keys(resUnit).length) {
-        const simplName = simplifyUnitStr(resUnit);
-        unitSuffix = unitObjToLatex(simplName ? parseUnitStr(simplName) : resUnit);
+        const simplName  = simplifyUnitStr(resUnit);
+        const siBaseObj  = simplName ? parseUnitStr(simplName) : unitObjToSIBase(resUnit);
+        const prefObj    = applyUnitPreferences(siBaseObj);
+        const prefFactor = getUnitConversionFactor(prefObj);
+        displayVal = fmtNumDisplay(prefFactor !== null ? rawSI / prefFactor : rawSI);
+        unitSuffix = unitObjToLatex(prefObj);
       } else {
+        displayVal = fmtNumDisplay(rawSI);
         unitSuffix = '';
       }
     }
@@ -1932,11 +1991,56 @@ function loadFromLocalStorage() {
     pageCount = 1;
     document.getElementById('editor').innerHTML = pages[0] || '';
     for (let i = 1; i < pages.length; i++) { const newEd = addPage(); newEd.innerHTML = pages[i] || ''; }
+    if (data.preferredUnits) { Object.assign(preferredUnits, data.preferredUnits); syncUnitPrefPanel(); }
     restoreMeta(data.meta || {});
     updateMirrorHeaders();
     reattachImageHandlers();
   } catch(e) {}
 }
+
+// ── Unit preference panel ──────────────────────────────────
+// Build the "Default Units" dropdown rows inside #unitPrefPanel and keep them
+// in sync whenever preferredUnits changes.
+function buildUnitPrefPanel() {
+  const panel = document.getElementById('unitPrefPanel');
+  if (!panel) return;
+  // Clear everything after the title row
+  while (panel.children.length > 1) panel.removeChild(panel.lastChild);
+  UNIT_PREF_GROUPS.forEach(({ label, si, opts }) => {
+    const row = document.createElement('div');
+    row.className = 'supref-row';
+    const lbl = document.createElement('span');
+    lbl.className = 'supref-lbl';
+    lbl.textContent = label;
+    const sel = document.createElement('select');
+    sel.className = 'supref-sel';
+    sel.dataset.si = si;
+    opts.forEach(opt => {
+      const o = document.createElement('option');
+      o.value = opt; o.textContent = opt;
+      if ((preferredUnits[si] || si) === opt) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', () => {
+      preferredUnits[si] = sel.value;
+      isDirty = true; autoSave();
+      rebuildVars(); // re-render all chips + sidebar with new preferences
+    });
+    row.appendChild(lbl);
+    row.appendChild(sel);
+    panel.appendChild(row);
+  });
+}
+
+// Update the select elements to match the current preferredUnits (after load).
+function syncUnitPrefPanel() {
+  document.querySelectorAll('.supref-sel').forEach(sel => {
+    const si = sel.dataset.si;
+    sel.value = preferredUnits[si] || si;
+  });
+}
+
+buildUnitPrefPanel();
 
 loadFromLocalStorage();
 rebuildVars();
@@ -2563,7 +2667,7 @@ function restoreMeta(meta) { Object.entries(meta).forEach(([id,val]) => { const 
 function buildSaveData() {
   const pages = [];
   getAllEditors().forEach((ed, i) => pages.push(ed.innerHTML));
-  return JSON.stringify({ version:2, meta:collectMeta(), pages, savedAt:new Date().toISOString() }, null, 2);
+  return JSON.stringify({ version:2, meta:collectMeta(), pages, preferredUnits, savedAt:new Date().toISOString() }, null, 2);
 }
 
 // ── Bug reporting ──────────────────────────────────────────────
@@ -2659,6 +2763,7 @@ function loadFile(input) {
         const newEd = addPage();
         newEd.innerHTML = pages[i] || '';
       }
+      if (data.preferredUnits) { Object.assign(preferredUnits, data.preferredUnits); syncUnitPrefPanel(); }
       restoreMeta(data.meta || {});
       updateMirrorHeaders();
       currentFileName = file.name.replace(/\.perega$/, '');
