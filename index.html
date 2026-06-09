@@ -607,7 +607,7 @@ const UNIT_PREF_GROUPS = [
   { label: 'Length',   si: 'm',   opts: ['mm','cm','m','km'] },
   { label: 'Force',    si: 'N',   opts: ['N','kN','MN'] },
   { label: 'Mass',     si: 'kg',  opts: ['g','kg','t'] },
-  { label: 'Pressure', si: 'Pa',  opts: ['Pa','kPa','MPa','GPa'] },
+  { label: 'Pressure', si: 'Pa',  opts: ['Pa','kPa','kN/m²','MPa','N/mm²','GPa'] },
   { label: 'Time',     si: 's',   opts: ['s','ms','min','hr'] },
 ];
 let preferredUnits = { m: 'm', N: 'N', kg: 'kg', Pa: 'Pa', s: 's' }; // defaults = SI
@@ -897,13 +897,32 @@ function unitObjToStr(u) {
 }
 // Apply user's preferred display units to a compound SI-base unit object.
 // Input:  {N:1, m:-2}  (SI base symbols)
-// Output: {kN:1, m:-2} (preferred display symbols, e.g. when kN preferred for N)
-// Each SI base in the object is replaced by its preferred symbol; exponents are preserved.
+// Output: {kN:1, m:-2} or {MPa:1} etc depending on preferences
+//
+// Strategy:
+//   1. If ANY group preference has been changed from SI default AND the result
+//      unit's fundamental dimension matches that group → use the group preference
+//      (e.g. {N:1,m:-2} ≡ Pa → Pressure group → MPa if Pressure=MPa).
+//      This lets the Pressure dropdown override N/m², kN/m² etc.
+//   2. Otherwise fall back to component-wise substitution (N→kN etc.)
+//      preserving the current default behaviour.
 function applyUnitPreferences(siBaseObj) {
   if (!siBaseObj || !Object.keys(siBaseObj).length) return siBaseObj;
+  const fund = toFundamental(siBaseObj);
+  if (fund) {
+    for (const { si } of UNIT_PREF_GROUPS) {
+      const pref = preferredUnits[si] || si;
+      if (pref === si) continue; // user hasn't changed this group — skip group match
+      const groupFund = toFundamental(parseUnitStr(si));
+      if (groupFund && unitObjEq(fund, groupFund)) {
+        return parseUnitStr(pref); // e.g. {MPa:1} when Pressure=MPa
+      }
+    }
+  }
+  // Fall back: replace each SI base symbol with its preferred variant
   const out = {};
-  for (const [si, exp] of Object.entries(siBaseObj)) {
-    const pref = preferredUnits[si] || si;
+  for (const [sym, exp] of Object.entries(siBaseObj)) {
+    const pref = preferredUnits[sym] || sym;
     out[pref] = (out[pref] || 0) + exp;
     if (!out[pref]) delete out[pref];
   }
@@ -1136,8 +1155,21 @@ function toLatexSubstituted(formula, variables, varUnitsMap) {
   let hasVars = false;
   for (const vn of vnames) {
     if (new RegExp(`\\b${vn}\\b`).test(formula)) {
-      const valStr = fmtNumDisplay(variables[vn]).replace(/,/g, '');
-      const unit = varUnitsMap && varUnitsMap[vn];
+      const rawSI = variables[vn];
+      const siUnitStr = varUnitsMap && varUnitsMap[vn];
+      let valStr, unit;
+      if (siUnitStr) {
+        // Convert the SI value to the preferred display unit so substituted
+        // values match the final result unit (e.g. 0.91 kN/m² not 910 N/m²).
+        const siBaseObj = parseUnitStr(siUnitStr);
+        const prefObj   = applyUnitPreferences(siBaseObj);
+        const factor    = getUnitConversionFactor(prefObj);
+        valStr = fmtNumDisplay(factor !== null ? rawSI / factor : rawSI).replace(/,/g, '');
+        unit   = unitObjToStr(prefObj);
+      } else {
+        valStr = fmtNumDisplay(rawSI).replace(/,/g, '');
+        unit   = null;
+      }
       subsMap[vn] = { val: valStr, unit: unit || null };
       hasVars = true;
     }
