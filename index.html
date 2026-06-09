@@ -608,9 +608,10 @@ const UNIT_PREF_GROUPS = [
   { label: 'Force',    si: 'N',   opts: ['N','kN','MN'] },
   { label: 'Mass',     si: 'kg',  opts: ['g','kg','t'] },
   { label: 'Stress',   si: 'Pa',  opts: ['Pa','kPa','MPa','N/mm²','GPa'] },
+  { label: 'Moment',   si: 'N·m', opts: ['N·mm','N·m','kN·mm','kN·m','MN·m'] },
   { label: 'Time',     si: 's',   opts: ['s','ms','min','hr'] },
 ];
-let preferredUnits = { m: 'm', N: 'N', kg: 'kg', Pa: 'Pa', s: 's' }; // defaults = SI
+let preferredUnits = { m: 'm', N: 'N', kg: 'kg', Pa: 'Pa', 'N·m': 'N·m', s: 's' }; // defaults = SI
 
 // Footer "updated" date — the date the tool itself was last updated (build date),
 // shown as DD.MM.YY. Bump this whenever the app code changes.
