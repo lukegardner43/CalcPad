@@ -1484,18 +1484,29 @@ document.addEventListener('focusin', e => {
 // container root, which the browser renders at the bottom-left corner — clashing with the
 // page border. Redirect that click to the end of the actual content instead (Word-like).
 document.addEventListener('mousedown', e => {
-  if (e.target.classList && e.target.classList.contains('calc-area')) {
-    e.preventDefault();
-    const ed = e.target;
-    ed.focus();
-    setActiveEditor(ed);
-    const range = document.createRange();
-    range.selectNodeContents(ed);
-    range.collapse(false);
-    const sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
+  if (!(e.target.classList && e.target.classList.contains('calc-area'))) return;
+  const ed = e.target;
+  // Work out where the actual rendered content ends. Bare text typed directly
+  // into the editor reports the editor itself as the event target, so we must
+  // only hijack clicks that land in the empty space *below* the content —
+  // otherwise clicking on text would jump the caret to the end (can't edit).
+  let contentBottom = ed.getBoundingClientRect().top;
+  if (ed.hasChildNodes()) {
+    const r = document.createRange();
+    r.selectNodeContents(ed);
+    const rects = r.getClientRects();
+    if (rects.length) contentBottom = rects[rects.length - 1].bottom;
   }
+  if (e.clientY <= contentBottom + 2) return; // click is on content — let browser place caret
+  e.preventDefault();
+  ed.focus();
+  setActiveEditor(ed);
+  const range = document.createRange();
+  range.selectNodeContents(ed);
+  range.collapse(false);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
 });
 
 // ── Page management ────────────────────────────────────────────
@@ -2316,6 +2327,27 @@ document.addEventListener('selectionchange', () => {
   }
 });
 
+// Remember the most recent caret position inside any editor. Clicking a toolbar
+// button (Table / Image) blurs the contenteditable and loses the selection, so
+// we restore this saved range before inserting — placing content at the cursor
+// (and letting a second image land right beside the first, on the same line).
+let lastEditRange = null;
+document.addEventListener('selectionchange', () => {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return;
+  const r = sel.getRangeAt(0);
+  let n = r.startContainer;
+  if (n.nodeType !== Node.ELEMENT_NODE) n = n.parentElement;
+  if (n && n.closest && n.closest('.calc-area')) lastEditRange = r.cloneRange();
+});
+function restoreEditRange(ed) {
+  if (!lastEditRange || !ed.contains(lastEditRange.startContainer)) return false;
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(lastEditRange);
+  return true;
+}
+
 function commitFormula(ed) {
   const sel = window.getSelection();
   if (!sel.rangeCount) { cancelFormula(); return; }
@@ -2441,6 +2473,7 @@ function insertImageSrc(src) {
   const ed = getActiveEditor();
   if (!ed) return;
   ed.focus();
+  restoreEditRange(ed);
   const wrap = document.createElement('span');
   wrap.contentEditable = 'false';
   wrap.className = 'calc-img-wrap';
@@ -2561,6 +2594,7 @@ function insertTable(rows, cols) {
   const ed = getActiveEditor();
   if (!ed) return;
   ed.focus();
+  restoreEditRange(ed);
   const table = document.createElement('table');
   table.className = 'calc-table';
   const thead = document.createElement('thead');
