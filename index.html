@@ -1826,6 +1826,9 @@ function splitNodeAtHeight(node, maxH, edTop) {
     let moved = null;
     if (edges.top < maxH - 2) moved = splitNodeAtHeight(kids[i], maxH, edTop);
     const clone = node.cloneNode(false); // preserve wrapper tag + attributes/styling
+    // Mark this as a split-off tail so pullBackFromNext only re-merges genuine
+    // splits — not two separate same-tag blocks (which would drop a line break).
+    clone.setAttribute('data-reflow-split', '1');
     clone.appendChild(moved && moved !== kids[i] ? moved : kids[i]);
     for (let j = i + 1; j < kids.length; j++) clone.appendChild(kids[j]);
     return clone;
@@ -1849,10 +1852,12 @@ function pullBackFromNext(edEl, contEl) {
     const node = nextEdEl.firstChild;
     const lastChild = edEl.lastChild;
 
-    // If the first node on the next page and the last node on this page share the
-    // same tag + class, they were probably split by splitNodeAtHeight — try merging
-    // them first so a split paragraph reunites cleanly rather than leaving two divs.
+    // Only re-merge if the first node on the next page is a tail that reflow()
+    // split off (marked data-reflow-split) AND shares the last node's tag/class.
+    // Two genuinely separate same-tag blocks must stay separate or the line break
+    // between them is lost.
     const canMerge = node.nodeType === Node.ELEMENT_NODE &&
+                     node.getAttribute('data-reflow-split') === '1' &&
                      lastChild && lastChild.nodeType === Node.ELEMENT_NODE &&
                      node.tagName === lastChild.tagName &&
                      node.className === lastChild.className;
@@ -1862,6 +1867,7 @@ function pullBackFromNext(edEl, contEl) {
       while (node.firstChild) lastChild.appendChild(node.firstChild);
       node.remove();
     } else {
+      if (node.nodeType === Node.ELEMENT_NODE) node.removeAttribute('data-reflow-split');
       edEl.appendChild(node);
     }
 
@@ -1875,6 +1881,7 @@ function pullBackFromNext(edEl, contEl) {
       // Doesn't fit — undo the move/merge and stop.
       if (canMerge) {
         const restored = lastChild.cloneNode(false);
+        restored.setAttribute('data-reflow-split', '1'); // still a tail remnant
         const kids = Array.from(lastChild.childNodes);
         for (let i = origChildCount; i < kids.length; i++) restored.appendChild(kids[i]);
         nextEdEl.insertBefore(restored, nextEdEl.firstChild);
@@ -2733,7 +2740,8 @@ function restoreMeta(meta) { Object.entries(meta).forEach(([id,val]) => { const 
 
 function buildSaveData() {
   const pages = [];
-  getAllEditors().forEach((ed, i) => pages.push(ed.innerHTML));
+  // Strip transient reflow markers so saved files stay clean; reflow re-derives them.
+  getAllEditors().forEach((ed, i) => pages.push(ed.innerHTML.replace(/ data-reflow-split="1"/g, '')));
   return JSON.stringify({ version:2, meta:collectMeta(), pages, preferredUnits, savedAt:new Date().toISOString() }, null, 2);
 }
 
