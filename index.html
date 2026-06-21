@@ -242,6 +242,8 @@ body{
 .calc-table td,.calc-table th{border:1px solid var(--bdr);padding:3px 6px;vertical-align:top;word-break:break-word;outline:none}
 .calc-table th{background:#f0f0f0;font-weight:700;text-align:left}
 .calc-table td:focus,.calc-table th:focus{background:#fff8fe;outline:2px solid var(--rubine);outline-offset:-2px}
+.calc-table td.tbl-calc,.calc-table th.tbl-calc{background:#f3f0ff}
+.calc-table td.tbl-calc:focus,.calc-table th.tbl-calc:focus{background:#fff8fe}
 .calc-table tr{break-inside:avoid;page-break-inside:avoid}
 .tbl-toolbar{display:none;position:absolute;z-index:50;background:#fff;border:1px solid #ddd;
   border-radius:3px;box-shadow:0 2px 8px rgba(0,0,0,.12);padding:3px 5px;gap:2px;align-items:center;
@@ -493,6 +495,9 @@ body{
   <div class="tbl-sep"></div>
   <button class="tbl-tb" onclick="tblDeleteRow()">Del row</button>
   <button class="tbl-tb" onclick="tblDeleteCol()">Del col</button>
+  <div class="tbl-sep"></div>
+  <button class="tbl-tb" onmousedown="event.preventDefault();tblInsertFormula('above')" title="Sum the numbers in the column above this cell (ignores text headings)">Σ Column</button>
+  <button class="tbl-tb" onmousedown="event.preventDefault();tblInsertFormula('left')" title="Sum the numbers in the row left of this cell (ignores row titles)">Σ Row</button>
   <div class="tbl-sep"></div>
   <button class="tbl-tb" onclick="tblDeleteTable()">✕ Delete table</button>
 </div>
@@ -2046,6 +2051,7 @@ function loadFromLocalStorage() {
     restoreMeta(data.meta || {});
     updateMirrorHeaders();
     reattachImageHandlers();
+    refreshAllTables();
   } catch(e) {}
 }
 
@@ -2095,6 +2101,7 @@ buildUnitPrefPanel();
 
 loadFromLocalStorage();
 rebuildVars();
+refreshAllTables();
 
 // ── Toolbar helpers ───────────────────────────────────────────
 function fmt(cmd) {
@@ -2651,8 +2658,31 @@ function showTableToolbar(table, cell) {
 function hideTableToolbar() { tblToolbar.classList.remove('visible'); activeTable = null; activeCell = null; }
 
 function attachTableHandlers(table) {
-  table.addEventListener('focusin', e => { const cell = e.target.closest('td,th'); if (cell) showTableToolbar(table, cell); });
-  table.addEventListener('focusout', e => { setTimeout(() => { if (!table.contains(document.activeElement) && !tblToolbar.contains(document.activeElement)) hideTableToolbar(); }, 150); });
+  table.addEventListener('focusin', e => {
+    const cell = e.target.closest('td,th'); if (!cell) return;
+    showTableToolbar(table, cell);
+    // Reveal the raw formula for editing while the cell is focused.
+    if (cell.dataset.formula) cell.textContent = cell.dataset.formula;
+  });
+  table.addEventListener('focusout', e => {
+    const cell = e.target.closest('td,th');
+    if (cell) {
+      const txt = cell.textContent.trim();
+      if (/^=/.test(txt) && parseTableFormula(txt)) {
+        cell.dataset.formula = txt; cell.classList.add('tbl-calc');
+      } else {
+        delete cell.dataset.formula; delete cell.dataset.value; cell.classList.remove('tbl-calc');
+      }
+      recomputeTableFormulas(table);
+      isDirty = true; autoSave();
+    }
+    setTimeout(() => { if (!table.contains(document.activeElement) && !tblToolbar.contains(document.activeElement)) hideTableToolbar(); }, 150);
+  });
+  table.addEventListener('input', () => {
+    // Live-update dependent formula cells as data is typed (skips the focused cell).
+    clearTimeout(table._recalcT);
+    table._recalcT = setTimeout(() => recomputeTableFormulas(table), 150);
+  });
   table.addEventListener('keydown', e => {
     if (e.key !== 'Tab') return; e.preventDefault();
     const cells = Array.from(table.querySelectorAll('th,td'));
@@ -2663,13 +2693,113 @@ function attachTableHandlers(table) {
     else { tblAddRowBelow(); const nc = Array.from(table.querySelectorAll('td')); const fn = nc[nc.length - table.querySelector('tr').cells.length]; if (fn) fn.focus(); }
   });
 }
-function tblAddRowBelow() { if (!activeTable||!activeCell) return; const row=activeCell.closest('tr'); const cc=activeTable.rows[0].cells.length; const nr=document.createElement('tr'); for(let i=0;i<cc;i++){const td=document.createElement('td');td.contentEditable='true';nr.appendChild(td);} row.parentNode.insertBefore(nr,row.nextSibling); nr.cells[0].focus(); }
-function tblAddRowAbove() { if (!activeTable||!activeCell) return; const row=activeCell.closest('tr'); const cc=activeTable.rows[0].cells.length; const nr=document.createElement('tr'); for(let i=0;i<cc;i++){const td=document.createElement('td');td.contentEditable='true';nr.appendChild(td);} row.parentNode.insertBefore(nr,row); nr.cells[0].focus(); }
-function tblAddColRight() { if (!activeTable||!activeCell) return; const idx=activeCell.cellIndex; Array.from(activeTable.rows).forEach((row,ri)=>{const c=ri===0?document.createElement('th'):document.createElement('td');c.contentEditable='true';const ref=row.cells[idx+1]||null;row.insertBefore(c,ref?ref.nextSibling:null);}); }
-function tblAddColLeft() { if (!activeTable||!activeCell) return; const idx=activeCell.cellIndex; Array.from(activeTable.rows).forEach((row,ri)=>{const c=ri===0?document.createElement('th'):document.createElement('td');c.contentEditable='true';row.insertBefore(c,row.cells[idx]);}); }
-function tblDeleteRow() { if (!activeTable||!activeCell) return; const row=activeCell.closest('tr'); if(activeTable.rows.length<=1){tblDeleteTable();return;} const prev=row.previousElementSibling||row.nextElementSibling; row.remove(); if(prev)prev.cells[0].focus(); else hideTableToolbar(); }
-function tblDeleteCol() { if (!activeTable||!activeCell) return; const idx=activeCell.cellIndex; if(activeTable.rows[0].cells.length<=1){tblDeleteTable();return;} Array.from(activeTable.rows).forEach(row=>{if(row.cells[idx])row.cells[idx].remove();}); }
+function tblAddRowBelow() { if (!activeTable||!activeCell) return; const row=activeCell.closest('tr'); const cc=activeTable.rows[0].cells.length; const nr=document.createElement('tr'); for(let i=0;i<cc;i++){const td=document.createElement('td');td.contentEditable='true';nr.appendChild(td);} row.parentNode.insertBefore(nr,row.nextSibling); recomputeTableFormulas(activeTable); nr.cells[0].focus(); }
+function tblAddRowAbove() { if (!activeTable||!activeCell) return; const row=activeCell.closest('tr'); const cc=activeTable.rows[0].cells.length; const nr=document.createElement('tr'); for(let i=0;i<cc;i++){const td=document.createElement('td');td.contentEditable='true';nr.appendChild(td);} row.parentNode.insertBefore(nr,row); recomputeTableFormulas(activeTable); nr.cells[0].focus(); }
+function tblAddColRight() { if (!activeTable||!activeCell) return; const idx=activeCell.cellIndex; Array.from(activeTable.rows).forEach((row,ri)=>{const c=ri===0?document.createElement('th'):document.createElement('td');c.contentEditable='true';const ref=row.cells[idx+1]||null;row.insertBefore(c,ref?ref.nextSibling:null);}); recomputeTableFormulas(activeTable); }
+function tblAddColLeft() { if (!activeTable||!activeCell) return; const idx=activeCell.cellIndex; Array.from(activeTable.rows).forEach((row,ri)=>{const c=ri===0?document.createElement('th'):document.createElement('td');c.contentEditable='true';row.insertBefore(c,row.cells[idx]);}); recomputeTableFormulas(activeTable); }
+function tblDeleteRow() { if (!activeTable||!activeCell) return; const row=activeCell.closest('tr'); if(activeTable.rows.length<=1){tblDeleteTable();return;} const prev=row.previousElementSibling||row.nextElementSibling; row.remove(); recomputeTableFormulas(activeTable); if(prev)prev.cells[0].focus(); else hideTableToolbar(); }
+function tblDeleteCol() { if (!activeTable||!activeCell) return; const idx=activeCell.cellIndex; if(activeTable.rows[0].cells.length<=1){tblDeleteTable();return;} Array.from(activeTable.rows).forEach(row=>{if(row.cells[idx])row.cells[idx].remove();}); recomputeTableFormulas(activeTable); }
 function tblDeleteTable() { if(!activeTable) return; hideTableToolbar(); activeTable.remove(); }
+
+// ── Table formulas (Excel-like SUM/AVG/… over rows & columns) ─────
+// Cells can hold a directional formula, e.g. =sum(above) / =sum(left) / =sum(col).
+// Directions: above, below, left, right, col (whole column), row (whole row).
+// Only numeric cells contribute, so text headings and row titles are skipped
+// automatically. A shared trailing unit (e.g. "kN") is carried onto the result.
+const TBL_FN_RE = /^=\s*(sum|avg|average|mean|min|max|count|product|prod)\s*\(\s*(above|below|left|right|col|column|row)\s*\)\s*$/i;
+function parseTableFormula(txt) {
+  const m = (txt || '').match(TBL_FN_RE);
+  if (!m) return null;
+  return { fn: m[1].toLowerCase(), dir: m[2].toLowerCase() };
+}
+function parseCellNumber(text) {
+  const t = (text || '').trim();
+  const m = t.match(/^([-+]?[\d,]*\.?\d+(?:[eE][-+]?\d+)?)\s*(.*)$/);
+  if (!m) return { num: null, unit: null };
+  const num = parseFloat(m[1].replace(/,/g, ''));
+  return { num: isNaN(num) ? null : num, unit: (m[2] || '').trim() || null };
+}
+function evalTableFormula(table, cell) {
+  const parsed = parseTableFormula(cell.dataset.formula);
+  if (!parsed) return null;
+  const { fn, dir } = parsed;
+  const tr = cell.closest('tr');
+  const rows = Array.from(table.rows);
+  const rowIdx = rows.indexOf(tr);
+  const colIdx = cell.cellIndex;
+  const contrib = [];
+  const add = c => { if (c && c !== cell) contrib.push(c); };
+  if (dir === 'above' || dir === 'col' || dir === 'column')
+    for (let r = 0; r < rowIdx; r++) add(rows[r].cells[colIdx]);
+  if (dir === 'below' || dir === 'col' || dir === 'column')
+    for (let r = rowIdx + 1; r < rows.length; r++) add(rows[r].cells[colIdx]);
+  if (dir === 'left' || dir === 'row')
+    for (let i = 0; i < colIdx; i++) add(tr.cells[i]);
+  if (dir === 'right' || dir === 'row')
+    for (let i = colIdx + 1; i < tr.cells.length; i++) add(tr.cells[i]);
+
+  const nums = []; let unit = null, unitSeen = false, unitConsistent = true;
+  contrib.forEach(c => {
+    let v;
+    if (c.dataset.formula && c.dataset.value !== undefined && c.dataset.value !== '') {
+      v = parseFloat(c.dataset.value); // use another formula cell's cached result
+    } else {
+      const p = parseCellNumber(c.textContent);
+      v = p.num;
+      if (p.unit) { if (!unitSeen) { unit = p.unit; unitSeen = true; } else if (p.unit !== unit) unitConsistent = false; }
+    }
+    if (v == null || isNaN(v)) return;
+    nums.push(v);
+  });
+
+  let val;
+  if (!nums.length) val = (fn === 'count') ? 0 : 0;
+  else switch (fn) {
+    case 'sum': val = nums.reduce((a, b) => a + b, 0); break;
+    case 'avg': case 'average': case 'mean': val = nums.reduce((a, b) => a + b, 0) / nums.length; break;
+    case 'min': val = Math.min(...nums); break;
+    case 'max': val = Math.max(...nums); break;
+    case 'count': val = nums.length; break;
+    case 'product': case 'prod': val = nums.reduce((a, b) => a * b, 1); break;
+    default: return null;
+  }
+  let text = fmtNumDisplay(val);
+  if (fn !== 'count' && unitSeen && unitConsistent && unit) text += ' ' + unit;
+  return { value: val, text };
+}
+function recomputeTableFormulas(table) {
+  const cells = Array.from(table.querySelectorAll('td[data-formula], th[data-formula]'));
+  if (!cells.length) return;
+  // Several passes so totals that depend on other totals converge.
+  const passes = Math.min(cells.length, 10);
+  for (let p = 0; p < passes; p++) {
+    let changed = false;
+    cells.forEach(cell => {
+      cell.classList.add('tbl-calc');
+      const res = evalTableFormula(table, cell);
+      if (!res) return;
+      if (cell.dataset.value !== String(res.value)) changed = true;
+      cell.dataset.value = String(res.value);
+      if (cell !== document.activeElement) cell.textContent = res.text; // don't clobber the cell being edited
+    });
+    if (!changed) break;
+  }
+}
+function tblInsertFormula(dir) {
+  if (!activeTable || !activeCell) return;
+  activeCell.dataset.formula = '=sum(' + dir + ')';
+  activeCell.classList.add('tbl-calc');
+  activeCell.textContent = activeCell.dataset.formula; // cell is focused → show raw; evaluates on blur
+  const r = document.createRange(); r.selectNodeContents(activeCell); r.collapse(false);
+  const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+  isDirty = true; autoSave();
+}
+function refreshAllTables() {
+  getAllEditors().forEach(ed => {
+    attachTableHandlersToArea(ed);
+    ed.querySelectorAll('.calc-table').forEach(t => recomputeTableFormulas(t));
+  });
+}
 document.addEventListener('mousedown', e => { if (!e.target.closest('.calc-table') && !e.target.closest('#tblToolbar')) hideTableToolbar(); });
 
 // ── Colour & font controls ─────────────────────────────────────
@@ -2740,8 +2870,13 @@ function restoreMeta(meta) { Object.entries(meta).forEach(([id,val]) => { const 
 
 function buildSaveData() {
   const pages = [];
-  // Strip transient reflow markers so saved files stay clean; reflow re-derives them.
-  getAllEditors().forEach((ed, i) => pages.push(ed.innerHTML.replace(/ data-reflow-split="1"/g, '')));
+  // Strip transient runtime markers so saved files stay clean and handlers
+  // re-attach on load; reflow + table formulas re-derive everything else.
+  getAllEditors().forEach((ed, i) => pages.push(
+    ed.innerHTML
+      .replace(/ data-reflow-split="1"/g, '')
+      .replace(/ data-tbl-handlers="1"/g, '')
+  ));
   return JSON.stringify({ version:2, meta:collectMeta(), pages, preferredUnits, savedAt:new Date().toISOString() }, null, 2);
 }
 
@@ -2845,6 +2980,7 @@ function loadFile(input) {
       isDirty = false; document.title = currentFileName + ' — CalcPad';
       reattachImageHandlers();
       rebuildVars();
+      refreshAllTables();
     } catch(err) { alert('Could not open file: ' + err.message); }
   };
   reader.readAsText(file); input.value = '';
