@@ -490,21 +490,43 @@ body{
 
 <!-- Table toolbar (shared) -->
 <div class="tbl-toolbar" id="tblToolbar">
-  <button class="tbl-tb" onclick="tblAddRowAbove()">↑ Row above</button>
-  <button class="tbl-tb" onclick="tblAddRowBelow()">↓ Row below</button>
+  <button class="tbl-tb tbl-touch-btn" data-action="tblAddRowAbove">↑ Row above</button>
+  <button class="tbl-tb tbl-touch-btn" data-action="tblAddRowBelow">↓ Row below</button>
   <div class="tbl-sep"></div>
-  <button class="tbl-tb" onclick="tblAddColLeft()">← Col left</button>
-  <button class="tbl-tb" onclick="tblAddColRight()">→ Col right</button>
+  <button class="tbl-tb tbl-touch-btn" data-action="tblAddColLeft">← Col left</button>
+  <button class="tbl-tb tbl-touch-btn" data-action="tblAddColRight">→ Col right</button>
   <div class="tbl-sep"></div>
-  <button class="tbl-tb" onclick="tblDeleteRow()">Del row</button>
-  <button class="tbl-tb" onclick="tblDeleteCol()">Del col</button>
+  <button class="tbl-tb tbl-touch-btn" data-action="tblDeleteRow">Del row</button>
+  <button class="tbl-tb tbl-touch-btn" data-action="tblDeleteCol">Del col</button>
   <div class="tbl-sep"></div>
-  <button class="tbl-tb" onmousedown="event.preventDefault();tblInsertFormula('above')" title="Sum the numbers in the column above this cell (ignores text headings)">Σ Column</button>
-  <button class="tbl-tb" onmousedown="event.preventDefault();tblInsertFormula('left')" title="Sum the numbers in the row left of this cell (ignores row titles)">Σ Row</button>
+  <button class="tbl-tb tbl-touch-btn" data-action="tblFormulaAbove" title="Sum column above (ignores headings)">Σ Column</button>
+  <button class="tbl-tb tbl-touch-btn" data-action="tblFormulaLeft" title="Sum row to the left (ignores titles)">Σ Row</button>
   <div class="tbl-sep"></div>
-  <button class="tbl-tb" onmousedown="event.preventDefault();tblNameVariable()" title="Name this cell as a variable so you can reference it in document formulas">𝑥 Name</button>
+  <button class="tbl-tb tbl-touch-btn" data-action="tblNameVariable" title="Name this cell as a document variable">𝑥 Name</button>
   <div class="tbl-sep"></div>
-  <button class="tbl-tb" onclick="tblDeleteTable()">✕ Delete table</button>
+  <button class="tbl-tb tbl-touch-btn" data-action="tblDeleteTable">✕ Delete table</button>
+</div>
+
+<!-- Inline variable-name dialog (replaces prompt() for iOS compatibility) -->
+<div id="tblVarModal" style="display:none;position:fixed;inset:0;z-index:9100;
+  background:rgba(0,0,0,.4);align-items:center;justify-content:center;font-family:Arial,sans-serif">
+  <div style="background:#fff;border-radius:6px;padding:18px 20px;width:280px;max-width:90vw;
+    box-shadow:0 4px 24px rgba(0,0,0,.25)">
+    <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:#1a1a1a">Name this cell as a variable</div>
+    <input id="tblVarInput" type="text" placeholder="e.g. F_total"
+      style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid #ccc;border-radius:4px;
+        font-size:13px;margin-bottom:12px;outline:none"
+      oninput="this.style.borderColor=(/^[a-zA-Z][a-zA-Z0-9_]*$/.test(this.value)||!this.value)?'#ccc':'#E50076'">
+    <div style="font-size:10px;color:#888;margin-top:-8px;margin-bottom:12px">
+      Letters, digits, underscores — start with a letter. Leave blank to remove.
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="tblVarModalCancel()"
+        style="padding:5px 14px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer;font-size:12px">Cancel</button>
+      <button onclick="tblVarModalOk()"
+        style="padding:5px 14px;border:none;border-radius:4px;background:var(--rubine);color:#fff;cursor:pointer;font-size:12px;font-weight:700">OK</button>
+    </div>
+  </div>
 </div>
 
 <!-- Page stack -->
@@ -2657,25 +2679,74 @@ function insertTable(rows, cols) {
 let activeTable = null, activeCell = null;
 const tblToolbar = document.getElementById('tblToolbar');
 
+// ── iOS-compatible toolbar show/hide ─────────────────────────
+// On iOS, tapping a toolbar button blurs the cell before the click fires.
+// We guard against that with _tblBarActive so hideTableToolbar ignores
+// the transient focusout.
+let _tblBarActive = false;
+tblToolbar.addEventListener('touchstart', () => { _tblBarActive = true; }, { passive: true });
+tblToolbar.addEventListener('touchend',   () => { setTimeout(() => { _tblBarActive = false; }, 400); }, { passive: true });
+tblToolbar.addEventListener('mousedown',  () => { _tblBarActive = true; });
+document.addEventListener('mouseup',      () => { setTimeout(() => { _tblBarActive = false; }, 200); });
+
+// Single delegated handler for all toolbar buttons — works with both mouse and
+// touch because it listens on 'click' (which iOS synthesises from touch).
+const TBL_ACTIONS = {
+  tblAddRowAbove: () => tblAddRowAbove(),
+  tblAddRowBelow: () => tblAddRowBelow(),
+  tblAddColLeft:  () => tblAddColLeft(),
+  tblAddColRight: () => tblAddColRight(),
+  tblDeleteRow:   () => tblDeleteRow(),
+  tblDeleteCol:   () => tblDeleteCol(),
+  tblFormulaAbove:() => tblInsertFormula('above'),
+  tblFormulaLeft: () => tblInsertFormula('left'),
+  tblNameVariable:() => tblNameVariable(),
+  tblDeleteTable: () => tblDeleteTable(),
+};
+tblToolbar.addEventListener('click', e => {
+  const btn = e.target.closest('.tbl-touch-btn');
+  if (!btn) return;
+  e.preventDefault(); e.stopPropagation();
+  const action = TBL_ACTIONS[btn.dataset.action];
+  if (action) action();
+});
+
 function showTableToolbar(table, cell) {
   activeTable = table; activeCell = cell;
   const tableRect = table.getBoundingClientRect();
-  const mainToolbarH = document.querySelector('.toolbar') ? document.querySelector('.toolbar').getBoundingClientRect().bottom : 40;
+  const mainToolbarH = (document.querySelector('.toolbar') || {getBoundingClientRect:()=>({bottom:40})}).getBoundingClientRect().bottom;
+  // Use visualViewport (iOS keyboard-aware) when available.
+  const vv = window.visualViewport;
+  const vvTop    = vv ? vv.offsetTop    : 0;
+  const vvBottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
   const topAbove = tableRect.top - 34;
-  // If the natural above-the-table position would overlap the sticky toolbar, drop it below the table instead.
-  const top = topAbove >= mainToolbarH ? topAbove : tableRect.bottom + 4;
+  let top = topAbove >= mainToolbarH ? topAbove : tableRect.bottom + 4;
+  // Don't let it go below the visible area (keyboard may be up).
+  top = Math.min(top, vvBottom - 38);
   tblToolbar.style.top  = top + 'px';
-  tblToolbar.style.left = tableRect.left + 'px';
+  tblToolbar.style.left = Math.max(4, tableRect.left) + 'px';
   tblToolbar.classList.add('visible');
 }
-function hideTableToolbar() { tblToolbar.classList.remove('visible'); activeTable = null; activeCell = null; }
+function hideTableToolbar() {
+  if (_tblBarActive) return;
+  tblToolbar.classList.remove('visible'); activeTable = null; activeCell = null;
+}
 
 function attachTableHandlers(table) {
+  // focusin: desktop + iOS (fired when a cell receives focus via tap/keyboard)
   table.addEventListener('focusin', e => {
     const cell = e.target.closest('td,th'); if (!cell) return;
+    activeCell = cell; // keep in sync before showing
     showTableToolbar(table, cell);
-    // Reveal the raw formula for editing while the cell is focused.
     if (cell.dataset.formula) cell.textContent = cell.dataset.formula;
+  });
+  // click/touchend: belt-and-suspenders for iOS where focusin may be delayed
+  table.addEventListener('click', e => {
+    const cell = e.target.closest('td,th'); if (!cell) return;
+    activeCell = cell;
+    showTableToolbar(table, cell);
+    if (cell.dataset.formula && cell.textContent !== cell.dataset.formula)
+      cell.textContent = cell.dataset.formula;
   });
   table.addEventListener('focusout', e => {
     const cell = e.target.closest('td,th');
@@ -2687,10 +2758,13 @@ function attachTableHandlers(table) {
         delete cell.dataset.formula; delete cell.dataset.value; cell.classList.remove('tbl-calc');
       }
       recomputeTableFormulas(table);
-      rebuildVars(); // named cells may have changed value
+      rebuildVars();
       isDirty = true; autoSave();
     }
-    setTimeout(() => { if (!table.contains(document.activeElement) && !tblToolbar.contains(document.activeElement)) hideTableToolbar(); }, 150);
+    setTimeout(() => {
+      if (!_tblBarActive && !table.contains(document.activeElement) && !tblToolbar.contains(document.activeElement))
+        hideTableToolbar();
+    }, 200);
   });
   table.addEventListener('input', () => {
     // Live-update dependent formula cells as data is typed (skips the focused cell).
@@ -2810,27 +2884,43 @@ function tblInsertFormula(dir) {
   const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
   isDirty = true; autoSave();
 }
-// Name the active cell so its value becomes a document variable usable in formula
-// chips (e.g. =F_total/2). Blank name removes it.
+// Name the active cell — uses an inline modal instead of prompt() for iOS compat.
+let _tblVarCell = null, _tblVarTable = null;
 function tblNameVariable() {
   if (!activeTable || !activeCell) return;
-  const cell = activeCell, table = activeTable;
-  const current = cell.dataset.varname || '';
-  const name = prompt('Variable name for this cell (letters, digits, _ — leave blank to remove):', current);
-  if (name === null) return; // cancelled
-  const trimmed = name.trim();
-  if (!trimmed) {
-    delete cell.dataset.varname;
-  } else if (!/^[a-zA-Z][a-zA-Z0-9_]*$/.test(trimmed)) {
-    alert('Invalid variable name. Use letters, digits and underscores, starting with a letter.');
-    return;
-  } else {
-    cell.dataset.varname = trimmed;
+  _tblVarCell = activeCell; _tblVarTable = activeTable;
+  const inp = document.getElementById('tblVarInput');
+  inp.value = _tblVarCell.dataset.varname || '';
+  inp.style.borderColor = '#ccc';
+  const modal = document.getElementById('tblVarModal');
+  modal.style.display = 'flex';
+  setTimeout(() => inp.focus(), 80);
+}
+function tblVarModalOk() {
+  const inp = document.getElementById('tblVarInput');
+  const trimmed = inp.value.trim();
+  if (trimmed && !/^[a-zA-Z][a-zA-Z0-9_]*$/.test(trimmed)) {
+    inp.style.borderColor = '#E50076'; inp.focus(); return;
   }
-  recomputeTableFormulas(table);
+  document.getElementById('tblVarModal').style.display = 'none';
+  if (!_tblVarCell) return;
+  if (!trimmed) delete _tblVarCell.dataset.varname;
+  else _tblVarCell.dataset.varname = trimmed;
+  recomputeTableFormulas(_tblVarTable);
   rebuildVars();
   isDirty = true; autoSave();
+  _tblVarCell = null; _tblVarTable = null;
 }
+function tblVarModalCancel() {
+  document.getElementById('tblVarModal').style.display = 'none';
+  _tblVarCell = null; _tblVarTable = null;
+}
+document.addEventListener('keydown', e => {
+  if (document.getElementById('tblVarModal').style.display === 'flex') {
+    if (e.key === 'Enter') { e.preventDefault(); tblVarModalOk(); }
+    if (e.key === 'Escape') tblVarModalCancel();
+  }
+});
 // Pull every named cell in a table into the document variable pool (SI base value
 // + SI unit), so formula chips can reference them like any other variable.
 function injectNamedCells(table) {
