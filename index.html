@@ -248,7 +248,7 @@ body{
 .calc-table td[data-varname]::before,.calc-table th[data-varname]::before{
   content:attr(data-varname) " = ";color:var(--purple);font-weight:600;font-style:italic}
 .calc-table tr{break-inside:avoid;page-break-inside:avoid}
-.tbl-toolbar{display:none;position:absolute;z-index:50;background:#fff;border:1px solid #ddd;
+.tbl-toolbar{display:none;position:fixed;z-index:250;background:#fff;border:1px solid #ddd;
   border-radius:3px;box-shadow:0 2px 8px rgba(0,0,0,.12);padding:3px 5px;gap:2px;align-items:center;
   font-family:Arial,sans-serif;font-size:10px}
 .tbl-toolbar.visible{display:flex}
@@ -2659,11 +2659,12 @@ const tblToolbar = document.getElementById('tblToolbar');
 
 function showTableToolbar(table, cell) {
   activeTable = table; activeCell = cell;
-  const pgContent = table.closest('.pg-content') || document.body;
-  const cbRect = pgContent.getBoundingClientRect();
   const tableRect = table.getBoundingClientRect();
-  tblToolbar.style.position = 'fixed';
-  tblToolbar.style.top  = (tableRect.top - 34) + 'px';
+  const mainToolbarH = document.querySelector('.toolbar') ? document.querySelector('.toolbar').getBoundingClientRect().bottom : 40;
+  const topAbove = tableRect.top - 34;
+  // If the natural above-the-table position would overlap the sticky toolbar, drop it below the table instead.
+  const top = topAbove >= mainToolbarH ? topAbove : tableRect.bottom + 4;
+  tblToolbar.style.top  = top + 'px';
   tblToolbar.style.left = tableRect.left + 'px';
   tblToolbar.classList.add('visible');
 }
