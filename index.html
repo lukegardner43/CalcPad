@@ -510,16 +510,21 @@ body{
 <!-- Inline variable-name dialog (replaces prompt() for iOS compatibility) -->
 <div id="tblVarModal" style="display:none;position:fixed;inset:0;z-index:9100;
   background:rgba(0,0,0,.4);align-items:center;justify-content:center;font-family:Arial,sans-serif">
-  <div style="background:#fff;border-radius:6px;padding:18px 20px;width:280px;max-width:90vw;
+  <div style="background:#fff;border-radius:6px;padding:18px 20px;width:300px;max-width:92vw;
     box-shadow:0 4px 24px rgba(0,0,0,.25)">
-    <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:#1a1a1a">Name this cell as a variable</div>
+    <div style="font-size:13px;font-weight:700;margin-bottom:12px;color:#1a1a1a">Name this cell as a variable</div>
+    <div style="font-size:10px;color:#888;margin-bottom:4px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Variable name</div>
     <input id="tblVarInput" type="text" placeholder="e.g. F_total"
       style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid #ccc;border-radius:4px;
-        font-size:13px;margin-bottom:12px;outline:none"
+        font-size:13px;margin-bottom:4px;outline:none"
       oninput="this.style.borderColor=(/^[a-zA-Z][a-zA-Z0-9_]*$/.test(this.value)||!this.value)?'#ccc':'#E50076'">
-    <div style="font-size:10px;color:#888;margin-top:-8px;margin-bottom:12px">
+    <div style="font-size:10px;color:#aaa;margin-bottom:12px">
       Letters, digits, underscores — start with a letter. Leave blank to remove.
     </div>
+    <div style="font-size:10px;color:#888;margin-bottom:4px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Unit <span style="font-weight:400;text-transform:none">(optional — overrides unit detected from cell)</span></div>
+    <input id="tblVarUnitInput" type="text" placeholder="e.g. kN, m, MPa, kN·m"
+      style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid #ccc;border-radius:4px;
+        font-size:13px;margin-bottom:16px;outline:none">
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button onclick="tblVarModalCancel()"
         style="padding:5px 14px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer;font-size:12px">Cancel</button>
@@ -2890,22 +2895,32 @@ function tblNameVariable() {
   if (!activeTable || !activeCell) return;
   _tblVarCell = activeCell; _tblVarTable = activeTable;
   const inp = document.getElementById('tblVarInput');
+  const unitInp = document.getElementById('tblVarUnitInput');
   inp.value = _tblVarCell.dataset.varname || '';
   inp.style.borderColor = '#ccc';
+  unitInp.value = _tblVarCell.dataset.varunit || '';
   const modal = document.getElementById('tblVarModal');
   modal.style.display = 'flex';
   setTimeout(() => inp.focus(), 80);
 }
 function tblVarModalOk() {
   const inp = document.getElementById('tblVarInput');
+  const unitInp = document.getElementById('tblVarUnitInput');
   const trimmed = inp.value.trim();
+  const unitTrimmed = unitInp.value.trim();
   if (trimmed && !/^[a-zA-Z][a-zA-Z0-9_]*$/.test(trimmed)) {
     inp.style.borderColor = '#E50076'; inp.focus(); return;
   }
   document.getElementById('tblVarModal').style.display = 'none';
   if (!_tblVarCell) return;
-  if (!trimmed) delete _tblVarCell.dataset.varname;
-  else _tblVarCell.dataset.varname = trimmed;
+  if (!trimmed) {
+    delete _tblVarCell.dataset.varname;
+    delete _tblVarCell.dataset.varunit;
+  } else {
+    _tblVarCell.dataset.varname = trimmed;
+    if (unitTrimmed) _tblVarCell.dataset.varunit = unitTrimmed;
+    else delete _tblVarCell.dataset.varunit;
+  }
   recomputeTableFormulas(_tblVarTable);
   rebuildVars();
   isDirty = true; autoSave();
@@ -2927,15 +2942,17 @@ function injectNamedCells(table) {
   table.querySelectorAll('[data-varname]').forEach(cell => {
     const name = cell.dataset.varname;
     if (!name) return;
-    let num, unit;
+    let num, autoUnit;
     if (cell.dataset.formula) {
       num = parseFloat(cell.dataset.value);
-      unit = cell.dataset.cunit || '';
+      autoUnit = cell.dataset.cunit || '';
     } else {
       const p = parseCellNumber(cell.textContent);
-      num = p.num; unit = p.unit || '';
+      num = p.num; autoUnit = p.unit || '';
     }
     if (num == null || isNaN(num)) return;
+    // Explicit unit from 𝑥 Name dialog overrides whatever is in the cell text.
+    const unit = (cell.dataset.varunit || autoUnit).trim();
     if (unit) {
       const conv = applyUnitConversion(num, unit);
       if (conv) { vars[name] = conv.siVal; varUnits[name] = conv.siUnitStr; }
