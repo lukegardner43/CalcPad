@@ -244,6 +244,9 @@ body{
 .calc-table td:focus,.calc-table th:focus{background:#fff8fe;outline:2px solid var(--rubine);outline-offset:-2px}
 .calc-table td.tbl-calc,.calc-table th.tbl-calc{background:#f3f0ff}
 .calc-table td.tbl-calc:focus,.calc-table th.tbl-calc:focus{background:#fff8fe}
+.calc-table td[data-varname],.calc-table th[data-varname]{border-left:2px solid var(--purple)}
+.calc-table td[data-varname]::before,.calc-table th[data-varname]::before{
+  content:attr(data-varname) " = ";color:var(--purple);font-weight:600;font-style:italic}
 .calc-table tr{break-inside:avoid;page-break-inside:avoid}
 .tbl-toolbar{display:none;position:absolute;z-index:50;background:#fff;border:1px solid #ddd;
   border-radius:3px;box-shadow:0 2px 8px rgba(0,0,0,.12);padding:3px 5px;gap:2px;align-items:center;
@@ -499,6 +502,8 @@ body{
   <button class="tbl-tb" onmousedown="event.preventDefault();tblInsertFormula('above')" title="Sum the numbers in the column above this cell (ignores text headings)">Σ Column</button>
   <button class="tbl-tb" onmousedown="event.preventDefault();tblInsertFormula('left')" title="Sum the numbers in the row left of this cell (ignores row titles)">Σ Row</button>
   <div class="tbl-sep"></div>
+  <button class="tbl-tb" onmousedown="event.preventDefault();tblNameVariable()" title="Name this cell as a variable so you can reference it in document formulas">𝑥 Name</button>
+  <div class="tbl-sep"></div>
   <button class="tbl-tb" onclick="tblDeleteTable()">✕ Delete table</button>
 </div>
 
@@ -662,6 +667,12 @@ function renderSidebar() {
           }
         }
       }
+    } else if (varUnits[name]) {
+      // Named table cell (no chip) — show value in preferred units for its dimension.
+      const siBaseObj = parseUnitStr(varUnits[name]);
+      const prefObj   = applyUnitPreferences(siBaseObj);
+      const f = getUnitConversionFactor(prefObj);
+      if (f !== null) { unit = unitObjToStr(prefObj); dispVal = fmtNum(vars[name] / f); }
     }
     const row = document.createElement('div');
     row.className = 'vs-row';
@@ -2138,7 +2149,8 @@ function rebuildVars() {
   vars = {};
   varUnits = {};
   getAllEditors().forEach(ed => {
-    Array.from(ed.querySelectorAll('.var-def-chip, .formula-chip')).forEach(chip => {
+    Array.from(ed.querySelectorAll('.var-def-chip, .formula-chip, .calc-table')).forEach(chip => {
+      if (chip.classList.contains('calc-table')) { injectNamedCells(chip); return; }
       if (chip.classList.contains('var-def-chip')) {
         const name = chip.dataset.varName;
         const expr = chip.dataset.varExpr;
@@ -2674,6 +2686,7 @@ function attachTableHandlers(table) {
         delete cell.dataset.formula; delete cell.dataset.value; cell.classList.remove('tbl-calc');
       }
       recomputeTableFormulas(table);
+      rebuildVars(); // named cells may have changed value
       isDirty = true; autoSave();
     }
     setTimeout(() => { if (!table.contains(document.activeElement) && !tblToolbar.contains(document.activeElement)) hideTableToolbar(); }, 150);
@@ -2693,12 +2706,12 @@ function attachTableHandlers(table) {
     else { tblAddRowBelow(); const nc = Array.from(table.querySelectorAll('td')); const fn = nc[nc.length - table.querySelector('tr').cells.length]; if (fn) fn.focus(); }
   });
 }
-function tblAddRowBelow() { if (!activeTable||!activeCell) return; const row=activeCell.closest('tr'); const cc=activeTable.rows[0].cells.length; const nr=document.createElement('tr'); for(let i=0;i<cc;i++){const td=document.createElement('td');td.contentEditable='true';nr.appendChild(td);} row.parentNode.insertBefore(nr,row.nextSibling); recomputeTableFormulas(activeTable); nr.cells[0].focus(); }
-function tblAddRowAbove() { if (!activeTable||!activeCell) return; const row=activeCell.closest('tr'); const cc=activeTable.rows[0].cells.length; const nr=document.createElement('tr'); for(let i=0;i<cc;i++){const td=document.createElement('td');td.contentEditable='true';nr.appendChild(td);} row.parentNode.insertBefore(nr,row); recomputeTableFormulas(activeTable); nr.cells[0].focus(); }
-function tblAddColRight() { if (!activeTable||!activeCell) return; const idx=activeCell.cellIndex; Array.from(activeTable.rows).forEach((row,ri)=>{const c=ri===0?document.createElement('th'):document.createElement('td');c.contentEditable='true';const ref=row.cells[idx+1]||null;row.insertBefore(c,ref?ref.nextSibling:null);}); recomputeTableFormulas(activeTable); }
-function tblAddColLeft() { if (!activeTable||!activeCell) return; const idx=activeCell.cellIndex; Array.from(activeTable.rows).forEach((row,ri)=>{const c=ri===0?document.createElement('th'):document.createElement('td');c.contentEditable='true';row.insertBefore(c,row.cells[idx]);}); recomputeTableFormulas(activeTable); }
-function tblDeleteRow() { if (!activeTable||!activeCell) return; const row=activeCell.closest('tr'); if(activeTable.rows.length<=1){tblDeleteTable();return;} const prev=row.previousElementSibling||row.nextElementSibling; row.remove(); recomputeTableFormulas(activeTable); if(prev)prev.cells[0].focus(); else hideTableToolbar(); }
-function tblDeleteCol() { if (!activeTable||!activeCell) return; const idx=activeCell.cellIndex; if(activeTable.rows[0].cells.length<=1){tblDeleteTable();return;} Array.from(activeTable.rows).forEach(row=>{if(row.cells[idx])row.cells[idx].remove();}); recomputeTableFormulas(activeTable); }
+function tblAddRowBelow() { if (!activeTable||!activeCell) return; const row=activeCell.closest('tr'); const cc=activeTable.rows[0].cells.length; const nr=document.createElement('tr'); for(let i=0;i<cc;i++){const td=document.createElement('td');td.contentEditable='true';nr.appendChild(td);} row.parentNode.insertBefore(nr,row.nextSibling); recomputeTableFormulas(activeTable); rebuildVars(); nr.cells[0].focus(); }
+function tblAddRowAbove() { if (!activeTable||!activeCell) return; const row=activeCell.closest('tr'); const cc=activeTable.rows[0].cells.length; const nr=document.createElement('tr'); for(let i=0;i<cc;i++){const td=document.createElement('td');td.contentEditable='true';nr.appendChild(td);} row.parentNode.insertBefore(nr,row); recomputeTableFormulas(activeTable); rebuildVars(); nr.cells[0].focus(); }
+function tblAddColRight() { if (!activeTable||!activeCell) return; const idx=activeCell.cellIndex; Array.from(activeTable.rows).forEach((row,ri)=>{const c=ri===0?document.createElement('th'):document.createElement('td');c.contentEditable='true';const ref=row.cells[idx+1]||null;row.insertBefore(c,ref?ref.nextSibling:null);}); recomputeTableFormulas(activeTable); rebuildVars(); }
+function tblAddColLeft() { if (!activeTable||!activeCell) return; const idx=activeCell.cellIndex; Array.from(activeTable.rows).forEach((row,ri)=>{const c=ri===0?document.createElement('th'):document.createElement('td');c.contentEditable='true';row.insertBefore(c,row.cells[idx]);}); recomputeTableFormulas(activeTable); rebuildVars(); }
+function tblDeleteRow() { if (!activeTable||!activeCell) return; const row=activeCell.closest('tr'); if(activeTable.rows.length<=1){tblDeleteTable();return;} const prev=row.previousElementSibling||row.nextElementSibling; row.remove(); recomputeTableFormulas(activeTable); rebuildVars(); if(prev)prev.cells[0].focus(); else hideTableToolbar(); }
+function tblDeleteCol() { if (!activeTable||!activeCell) return; const idx=activeCell.cellIndex; if(activeTable.rows[0].cells.length<=1){tblDeleteTable();return;} Array.from(activeTable.rows).forEach(row=>{if(row.cells[idx])row.cells[idx].remove();}); recomputeTableFormulas(activeTable); rebuildVars(); }
 function tblDeleteTable() { if(!activeTable) return; hideTableToolbar(); activeTable.remove(); }
 
 // ── Table formulas (Excel-like SUM/AVG/… over rows & columns) ─────
@@ -2763,9 +2776,10 @@ function evalTableFormula(table, cell) {
     case 'product': case 'prod': val = nums.reduce((a, b) => a * b, 1); break;
     default: return null;
   }
+  const resUnit = (fn !== 'count' && unitSeen && unitConsistent && unit) ? unit : '';
   let text = fmtNumDisplay(val);
-  if (fn !== 'count' && unitSeen && unitConsistent && unit) text += ' ' + unit;
-  return { value: val, text };
+  if (resUnit) text += ' ' + resUnit;
+  return { value: val, text, unit: resUnit };
 }
 function recomputeTableFormulas(table) {
   const cells = Array.from(table.querySelectorAll('td[data-formula], th[data-formula]'));
@@ -2780,6 +2794,7 @@ function recomputeTableFormulas(table) {
       if (!res) return;
       if (cell.dataset.value !== String(res.value)) changed = true;
       cell.dataset.value = String(res.value);
+      cell.dataset.cunit = res.unit || '';
       if (cell !== document.activeElement) cell.textContent = res.text; // don't clobber the cell being edited
     });
     if (!changed) break;
@@ -2794,11 +2809,57 @@ function tblInsertFormula(dir) {
   const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
   isDirty = true; autoSave();
 }
+// Name the active cell so its value becomes a document variable usable in formula
+// chips (e.g. =F_total/2). Blank name removes it.
+function tblNameVariable() {
+  if (!activeTable || !activeCell) return;
+  const cell = activeCell, table = activeTable;
+  const current = cell.dataset.varname || '';
+  const name = prompt('Variable name for this cell (letters, digits, _ — leave blank to remove):', current);
+  if (name === null) return; // cancelled
+  const trimmed = name.trim();
+  if (!trimmed) {
+    delete cell.dataset.varname;
+  } else if (!/^[a-zA-Z][a-zA-Z0-9_]*$/.test(trimmed)) {
+    alert('Invalid variable name. Use letters, digits and underscores, starting with a letter.');
+    return;
+  } else {
+    cell.dataset.varname = trimmed;
+  }
+  recomputeTableFormulas(table);
+  rebuildVars();
+  isDirty = true; autoSave();
+}
+// Pull every named cell in a table into the document variable pool (SI base value
+// + SI unit), so formula chips can reference them like any other variable.
+function injectNamedCells(table) {
+  table.querySelectorAll('[data-varname]').forEach(cell => {
+    const name = cell.dataset.varname;
+    if (!name) return;
+    let num, unit;
+    if (cell.dataset.formula) {
+      num = parseFloat(cell.dataset.value);
+      unit = cell.dataset.cunit || '';
+    } else {
+      const p = parseCellNumber(cell.textContent);
+      num = p.num; unit = p.unit || '';
+    }
+    if (num == null || isNaN(num)) return;
+    if (unit) {
+      const conv = applyUnitConversion(num, unit);
+      if (conv) { vars[name] = conv.siVal; varUnits[name] = conv.siUnitStr; }
+      else { vars[name] = num; varUnits[name] = unit; }
+    } else {
+      vars[name] = num;
+    }
+  });
+}
 function refreshAllTables() {
   getAllEditors().forEach(ed => {
     attachTableHandlersToArea(ed);
     ed.querySelectorAll('.calc-table').forEach(t => recomputeTableFormulas(t));
   });
+  rebuildVars(); // named cells may now contribute variables
 }
 document.addEventListener('mousedown', e => { if (!e.target.closest('.calc-table') && !e.target.closest('#tblToolbar')) hideTableToolbar(); });
 
