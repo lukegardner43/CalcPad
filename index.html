@@ -778,7 +778,10 @@ function evalFormula(raw, variables) {
 function fmtNum(n) {
   const r = Math.round(n * 1e10) / 1e10;
   if (Number.isInteger(r)) return r.toLocaleString('en-GB');
-  return parseFloat(r.toFixed(8)).toString();
+  // Use toPrecision on the original value (not the rounded r) to preserve enough
+  // significant figures for downstream unit conversions, e.g. 4.167e-7 m³ → 416.67 mm³.
+  // toFixed(8) would give 0.00000042 (only 2 sig figs) and corrupt the result.
+  return parseFloat(n.toPrecision(12)).toString();
 }
 
 // For display only: 2dp for numbers ≥ 0.01, 3 sig-figs for smaller
