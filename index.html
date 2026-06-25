@@ -899,7 +899,16 @@ function evalUnitExpr(formula, varUnitsMap) {
   function parseUnary(){if(peek().t==='-'||peek().t==='+'){consume();return parseUnary();}return parsePower();}
   function parsePower(){const base=parsePrimary();if(peek().t==='^'){consume();let sign=1;if(peek().t==='-'){consume();sign=-1;}else if(peek().t==='+')consume();if(peek().t==='num'){const n=parseFloat(consume().v)*sign;return unitPow(base,n);}parseUnary();return null;}return base;}
   function parsePrimary(){const tok=peek();if(tok.t==='('){consume();const r=parseExpr();eat(')');return r;}if(tok.t==='num'){consume();if(peek().t==='id'&&Object.prototype.hasOwnProperty.call(UNIT_CONVERSIONS,peek().v)){const u=consume().v;return parseUnitStr(UNIT_SI_BASE[u]||u);}return{};}if(tok.t==='id'){consume();if(peek().t==='('){consume();let d=1;while(d>0&&peek().t!=='EOF'){const t=consume();if(t.t==='(')d++;else if(t.t===')')d--;}return null;}const u=varUnitsMap[tok.v];if(u)return parseUnitStr(u);if(Object.prototype.hasOwnProperty.call(vars,tok.v))return{};return{};}consume();return null;}
-  try{return parseExpr();}catch(e){return null;}
+  try{
+    const result = parseExpr();
+    if (result && Object.keys(result).length) {
+      // If the unit reduces to no physical dimension (e.g. kN/N or kNm/kNm),
+      // return {} so callers treat it as dimensionless and show no unit suffix.
+      const fund = toFundamental(result);
+      if (fund !== null && !Object.keys(fund).length) return {};
+    }
+    return result;
+  }catch(e){return null;}
 }
 
 // ── Unit conversion to SI ──────────────────────────────────
