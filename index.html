@@ -1271,7 +1271,13 @@ function renderVarChipContent(chip) {
         exprUnitSuffix = unitObjToLatex(prefObj);
       } else {
         exprUnitSuffix = unit ? unitToLatex(unit) : '';
-        displayValStr = fmtNumDisplay(val);
+        // val is stored in SI; divide by the unit factor to get the display number.
+        if (unit) {
+          const dFactor = getUnitConversionFactor(parseUnitStr(unit));
+          displayValStr = fmtNumDisplay(dFactor !== null ? val / dFactor : val);
+        } else {
+          displayValStr = fmtNumDisplay(val);
+        }
       }
     }
     try {
@@ -2188,10 +2194,23 @@ function rebuildVars() {
           try {
             const v = parseFloat(evalFormula(expr, vars).replace(/,/g, ''));
             if (!isNaN(v)) {
-              chip.dataset.varVal = String(v);
-              vars[name] = v;
-              if (unit) { varUnits[name] = siUnit; }
-              else { const inf = evalUnitExpr(expr, varUnits); if (inf && Object.keys(inf).length) varUnits[name] = simplifyUnitStr(inf) || unitObjToStr(inf); }
+              // Convert formula result to SI so downstream chips get the right value.
+              // varUnit = trailing unit ("4.6/100 kN/m" style); varDisplayUnit = [kN/m] specifier.
+              let siV = v;
+              const dispUnit = chip.dataset.varDisplayUnit || '';
+              if (unit) {
+                const conv = applyUnitConversion(v, unit);
+                if (conv) siV = conv.siVal;
+              } else if (dispUnit) {
+                const conv = applyUnitConversion(v, dispUnit);
+                if (conv) { siV = conv.siVal; varUnits[name] = conv.siUnitStr; }
+              } else {
+                const inf = evalUnitExpr(expr, varUnits);
+                if (inf && Object.keys(inf).length) varUnits[name] = simplifyUnitStr(inf) || unitObjToStr(inf);
+              }
+              chip.dataset.varVal = String(siV);
+              vars[name] = siV;
+              if (unit) varUnits[name] = siUnit;
               renderVarChipContent(chip);
             }
           } catch(e) {
