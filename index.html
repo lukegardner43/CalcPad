@@ -752,7 +752,8 @@ function evalFormula(raw, variables) {
   {
     const unitSymsSorted = Object.keys(UNIT_CONVERSIONS).sort((a,b) => b.length - a.length);
     const unitAltStr = unitSymsSorted.map(u => u.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-    const unitLitRe = new RegExp(`((?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][+-]?\\d+)?)\\s*(${unitAltStr})(?![a-zA-Z0-9_])`, 'g');
+    // Negative lookbehind: don't match digits that are part of a variable name (e.g. F1kN).
+    const unitLitRe = new RegExp(`(?<![a-zA-Z0-9_])((?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][+-]?\\d+)?)\\s*(${unitAltStr})(?![a-zA-Z0-9_])`, 'g');
     expr = expr.replace(unitLitRe, (match, numStr, unit) => {
       if (varNames.has(unit)) return match;
       const factor = UNIT_CONVERSIONS[unit];
