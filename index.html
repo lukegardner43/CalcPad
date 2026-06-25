@@ -748,6 +748,17 @@ function evalFormula(raw, variables) {
     return FUNS[up] ? up + m.slice(name.length) : m;
   });
   expr = expr.replace(/\^/g, '**');
+  // Pre-process unit literals: "5kN" → 5000, "100mm" → 0.1, "1m" → 1 (SI values)
+  {
+    const unitSymsSorted = Object.keys(UNIT_CONVERSIONS).sort((a,b) => b.length - a.length);
+    const unitAltStr = unitSymsSorted.map(u => u.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+    const unitLitRe = new RegExp(`((?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][+-]?\\d+)?)\\s*(${unitAltStr})(?![a-zA-Z0-9_])`, 'g');
+    expr = expr.replace(unitLitRe, (match, numStr, unit) => {
+      if (varNames.has(unit)) return match;
+      const factor = UNIT_CONVERSIONS[unit];
+      return String(parseFloat(numStr) * factor);
+    });
+  }
   const vnames = Object.keys(variables_).sort((a,b) => b.length - a.length);
   for (const vn of vnames)
     expr = expr.replace(new RegExp(`\\b${vn}\\b`, 'g'), `(${variables_[vn]})`);
@@ -883,7 +894,7 @@ function evalUnitExpr(formula, varUnitsMap) {
   function parseTerm(){let l=parseUnary();while(peek().t==='*'||peek().t==='/'){const op=consume().t;const r=parseUnary();l=op==='*'?unitMul(l,r):unitDiv(l,r);}return l;}
   function parseUnary(){if(peek().t==='-'||peek().t==='+'){consume();return parseUnary();}return parsePower();}
   function parsePower(){const base=parsePrimary();if(peek().t==='^'){consume();let sign=1;if(peek().t==='-'){consume();sign=-1;}else if(peek().t==='+')consume();if(peek().t==='num'){const n=parseFloat(consume().v)*sign;return unitPow(base,n);}parseUnary();return null;}return base;}
-  function parsePrimary(){const tok=peek();if(tok.t==='('){consume();const r=parseExpr();eat(')');return r;}if(tok.t==='num'){consume();if(peek().t==='id'&&Object.prototype.hasOwnProperty.call(UNIT_CONVERSIONS,peek().v)){const u=consume().v;return parseUnitStr(UNIT_SI_BASE[u]||u);}return{};}if(tok.t==='id'){consume();if(peek().t==='('){consume();let d=1;while(d>0&&peek().t!=='EOF'){const t=consume();if(t.t==='(')d++;else if(t.t===')')d--;}return null;}const u=varUnitsMap[tok.v];if(u)return parseUnitStr(u);if(Object.prototype.hasOwnProperty.call(vars,tok.v))return null;return{};}consume();return null;}
+  function parsePrimary(){const tok=peek();if(tok.t==='('){consume();const r=parseExpr();eat(')');return r;}if(tok.t==='num'){consume();if(peek().t==='id'&&Object.prototype.hasOwnProperty.call(UNIT_CONVERSIONS,peek().v)){const u=consume().v;return parseUnitStr(UNIT_SI_BASE[u]||u);}return{};}if(tok.t==='id'){consume();if(peek().t==='('){consume();let d=1;while(d>0&&peek().t!=='EOF'){const t=consume();if(t.t==='(')d++;else if(t.t===')')d--;}return null;}const u=varUnitsMap[tok.v];if(u)return parseUnitStr(u);if(Object.prototype.hasOwnProperty.call(vars,tok.v))return{};return{};}consume();return null;}
   try{return parseExpr();}catch(e){return null;}
 }
 
