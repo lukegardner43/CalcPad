@@ -2755,7 +2755,9 @@ function attachTableHandlers(table) {
   });
   table.addEventListener('focusout', e => {
     const cell = e.target.closest('td,th');
-    if (cell) {
+    // If a toolbar button is being pressed, skip cell processing — the toolbar
+    // action will set/update dataset.formula itself and call recomputeTableFormulas.
+    if (cell && !_tblBarActive) {
       const txt = cell.textContent.trim();
       if (/^=/.test(txt) && parseTableFormula(txt)) {
         cell.dataset.formula = txt; cell.classList.add('tbl-calc');
@@ -2884,9 +2886,9 @@ function tblInsertFormula(dir) {
   if (!activeTable || !activeCell) return;
   activeCell.dataset.formula = '=sum(' + dir + ')';
   activeCell.classList.add('tbl-calc');
-  activeCell.textContent = activeCell.dataset.formula; // cell is focused → show raw; evaluates on blur
-  const r = document.createRange(); r.selectNodeContents(activeCell); r.collapse(false);
-  const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+  // Evaluate immediately — focusout fires before the click so we can't rely on it.
+  recomputeTableFormulas(activeTable);
+  rebuildVars();
   isDirty = true; autoSave();
 }
 // Name the active cell — uses an inline modal instead of prompt() for iOS compat.
