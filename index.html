@@ -1267,7 +1267,13 @@ function renderVarChipContent(chip) {
   if (expr) {
     // Render:  name = <LaTeX expression> [ = substituted ] = value [unit]
     const displayUnit = chip.dataset.varDisplayUnit || '';
-    const exprUnit = evalUnitExpr(expr, varUnits);
+    let exprUnit = evalUnitExpr(expr, varUnits);
+    // Belt-and-suspenders: collapse any non-empty unit object that is fundamentally
+    // dimensionless (e.g. kN/N or kN·m/kN·m when prefixes differ) so no unit is shown.
+    if (exprUnit && Object.keys(exprUnit).length) {
+      const _fund = toFundamental(exprUnit);
+      if (_fund !== null && !Object.keys(_fund).length) exprUnit = {};
+    }
     // Check for unit dimension mismatch when a display unit is specified
     if (displayUnit && exprUnit && Object.keys(exprUnit).length) {
       const specUnitObj = parseUnitStr(displayUnit);
@@ -1472,7 +1478,12 @@ function setFormulaContent(chip, formula, result, isError) {
     const sub = toLatexSubstituted(formula, vars, varUnits);
     // Use full-precision float from result string so 2dp rounding doesn't corrupt unit conversion
     const rawSI = parseFloat(result.replace(/,/g, ''));
-    const resUnit = evalUnitExpr(formula, varUnits);
+    let resUnit = evalUnitExpr(formula, varUnits);
+    // Belt-and-suspenders: collapse fundamentally-dimensionless unit objects (e.g. kN/N).
+    if (resUnit && Object.keys(resUnit).length) {
+      const _fund = toFundamental(resUnit);
+      if (_fund !== null && !Object.keys(_fund).length) resUnit = {};
+    }
     let displayVal, unitSuffix = '';
     if (outputUnit) {
       // Check that the specified unit is dimensionally compatible with the formula result
