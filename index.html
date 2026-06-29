@@ -2663,12 +2663,131 @@ document.addEventListener('keydown', e => {
     }
   }
 });
+// Convert one pasted line of text into a fragment, turning "name = expr",
+// "desc name = expr" and bare "= expr" lines into chips exactly as pressing Enter
+// would. wvars/wunits accumulate definitions so later lines can reference earlier
+// ones in the same paste; `taken` tracks names already defined (avoids duplicates).
+function pasteLineToFragment(rawLine, wvars, wunits, taken) {
+  const frag = document.createDocumentFragment();
+  const trimmed = rawLine.trim();
+  if (!trimmed) return frag; // blank line — the <br> between lines provides the break
+
+  // Bare formula:  "= expr"  (leading '=', not '==')
+  if (/^=(?!=)/.test(trimmed)) {
+    let formula = trimmed.slice(1).trim();
+    let outputUnit = '';
+    const um = formula.match(/^(.*?)\s*\[([^\]]+)\]\s*$/);
+    if (um && um[1].trim()) { formula = um[1].trim(); outputUnit = um[2].trim(); }
+    if (formula) {
+      let result, isError = false;
+      try { result = evalFormula(formula, wvars); } catch(ex) { result = ex.message || 'Error'; isError = true; }
+      frag.appendChild(makeFormulaChip(formula, result, isError, outputUnit));
+      frag.appendChild(document.createTextNode(' '));
+      return frag;
+    }
+  }
+
+  // Variable definition:  "name = expr"  or  "desc name = expr"
+  const m = trimmed.match(VAR_RE) || trimmed.match(VAR_DESC_RE);
+  if (m) {
+    const isDesc = m.length === 4 && m[3] !== undefined;
+    const varName = isDesc ? m[2] : m[1];
+    let exprStr = (isDesc ? m[3] : m[2]).trim();
+    const prefix = isDesc ? m[1] : '';
+    let dispUnit = '';
+    const dm = exprStr.match(/^(.*?)\s*\[([^\]]+)\]\s*$/);
+    if (dm && dm[1].trim()) { exprStr = dm[1].trim(); dispUnit = dm[2].trim(); }
+
+    // Already defined elsewhere (or earlier in this paste) — leave as plain text
+    // rather than create a conflicting second definition.
+    if (taken.has(varName)) { frag.appendChild(document.createTextNode(rawLine)); return frag; }
+
+    let val, unit = '', siUnit = '', ok = false;
+    try {
+      val = parseFloat(evalFormula(exprStr, wvars).replace(/,/g, ''));
+      if (isNaN(val)) throw new Error('NaN');
+      const inferred = evalUnitExpr(exprStr, wunits);
+      if (inferred && Object.keys(inferred).length) { siUnit = unit = unitObjToStr(inferred); }
+      ok = true;
+    } catch(err) {
+      const ue = extractValueAndUnit(exprStr);
+      if (ue) {
+        unit = ue.unit; exprStr = ue.numStr;
+        const conv = applyUnitConversion(ue.val, unit);
+        if (conv) { val = conv.siVal; siUnit = conv.siUnitStr; }
+        else { val = ue.val; siUnit = unit; }
+        ok = true;
+      }
+    }
+
+    if (ok) {
+      if (prefix) frag.appendChild(document.createTextNode(prefix));
+      frag.appendChild(makeVarDefChip(varName, val, exprStr, unit, siUnit, dispUnit));
+      frag.appendChild(document.createTextNode(' '));
+      taken.add(varName);
+      wvars[varName] = val;
+      if (siUnit) wunits[varName] = siUnit;
+      return frag;
+    }
+    // Couldn't evaluate — commit an error formula chip so the failure is visible
+    // (consistent with the Enter-key handler), keeping "name =" as leading text.
+    let result, isError = false;
+    try { result = evalFormula(exprStr, wvars); } catch(ex) { result = ex.message || 'Error'; isError = true; }
+    const before = trimmed.slice(0, trimmed.indexOf('='));
+    if (before) frag.appendChild(document.createTextNode(before));
+    frag.appendChild(makeFormulaChip(exprStr, result, isError, dispUnit));
+    frag.appendChild(document.createTextNode(' '));
+    return frag;
+  }
+
+  // Not a formula line — keep it as plain text
+  frag.appendChild(document.createTextNode(rawLine));
+  return frag;
+}
+
+// Insert pasted plain text at the caret, converting formula lines into chips.
+function insertPastedText(text) {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return;
+  const range = sel.getRangeAt(0);
+  range.deleteContents();
+  const lines = text.split(/\r\n|\r|\n/);
+  const wvars  = { ...vars };
+  const wunits = { ...varUnits };
+  const taken  = new Set(Array.from(document.querySelectorAll('.var-def-chip')).map(c => c.dataset.varName));
+  const master = document.createDocumentFragment();
+  lines.forEach((line, i) => {
+    if (i > 0) master.appendChild(document.createElement('br'));
+    master.appendChild(pasteLineToFragment(line, wvars, wunits, taken));
+  });
+  const lastNode = master.lastChild;
+  range.insertNode(master);
+  if (lastNode) {
+    const r = document.createRange();
+    r.setStartAfter(lastNode); r.collapse(true);
+    sel.removeAllRanges(); sel.addRange(r);
+  }
+  _editCommitPending = true; setTimeout(() => { _editCommitPending = false; }, 500);
+  rebuildVars();
+  isDirty = true; autoSave();
+}
+
 document.addEventListener('paste', e => {
-  if (!e.target.closest('.calc-area')) return;
+  const ca = e.target.closest('.calc-area');
+  if (!ca) return;
   const cd = e.clipboardData;
   if (!cd) return;
-  const hasText = cd.types && (cd.types.indexOf('text/plain') !== -1 || cd.types.indexOf('text/html') !== -1);
-  if (hasText) return;
+  // Plain text (also strips messy rich-text HTML from Word etc.): convert formulas
+  const text = cd.getData ? cd.getData('text/plain') : '';
+  if (text) {
+    e.preventDefault();
+    setActiveEditor(ca);
+    // Mid-formula edit: insert as plain text and let the normal typing flow handle it
+    if (formulaBuffer !== null) { document.execCommand('insertText', false, text); return; }
+    insertPastedText(text);
+    return;
+  }
+  // No text — handle an image on the clipboard
   const items = cd.items;
   if (!items) return;
   for (const item of items) {
