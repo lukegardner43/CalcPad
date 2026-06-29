@@ -2354,7 +2354,30 @@ document.addEventListener('keydown', e => {
         }
       } catch(err) {
         const ue = extractValueAndUnit(exprStr);
-        if (!ue) return;
+        if (!ue) {
+          // "name = expr" matched but the expression can't be evaluated (e.g. an
+          // undefined variable or a typo) and isn't a plain value+unit either.
+          // Don't drop the line silently — commit an error formula chip so the
+          // failure is visible, mirroring commitFormula()'s fallback. (Without this
+          // the typed text just sat there with no chip and no error.)
+          e.preventDefault();
+          let result, isError = false;
+          try { result = evalFormula(exprStr, vars); }
+          catch(ex) { result = ex.message || 'Error'; isError = true; }
+          const before = fullText.slice(0, fullText.indexOf('='));
+          const parent = node.parentNode;
+          const frag = document.createDocumentFragment();
+          if (before) frag.appendChild(document.createTextNode(before));
+          frag.appendChild(makeFormulaChip(exprStr, result, isError, dispUnit));
+          const spacer = document.createTextNode(' ');
+          frag.appendChild(spacer);
+          parent.replaceChild(frag, node);
+          const r = document.createRange();
+          r.setStartAfter(spacer); r.collapse(true);
+          sel.removeAllRanges(); sel.addRange(r);
+          rebuildVars();
+          return;
+        }
         const origNumStr = ue.numStr;
         unit = ue.unit; exprStr = origNumStr;
         const conv = applyUnitConversion(ue.val, unit);
