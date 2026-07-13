@@ -736,6 +736,102 @@ const FUNS = {
 
 const MATH_CONSTS = { pi: Math.PI };
 
+// Rewrite ^ as ** with standard maths precedence. A plain /\^/g → '**' replace
+// breaks on unary minus: JS rejects -a**b outright, and even when it parses,
+// maths convention says -2^2 = -(2²) = -4, not (-2)² = 4. Parse and re-emit with
+// explicit parens: -base^exp → -(base**exp), right-associative (2^3^2 = 2^(3^2)).
+// Unknown tokens (comparisons, commas) pass through verbatim; "5 mm" spacing is
+// preserved so the unit-literal regex downstream still matches. Falls back to the
+// old blanket replace if anything unexpected trips the parser.
+function transformPowers(expr) {
+  if (expr.indexOf('^') === -1) return expr;
+  try {
+    // Local tokenizer: like tokenize() but understands scientific notation (1e5),
+    // which the shared tokenizer splits into number + identifier.
+    const toks = [];
+    let i = 0;
+    while (i < expr.length) {
+      const ch = expr[i];
+      if (/\s/.test(ch)) { i++; continue; }
+      if (/\d/.test(ch) || (ch === '.' && /\d/.test(expr[i + 1] || ''))) {
+        let n = '';
+        while (i < expr.length && /[\d.]/.test(expr[i])) n += expr[i++];
+        if ((expr[i] === 'e' || expr[i] === 'E') && /[\d+-]/.test(expr[i + 1] || '')) {
+          n += expr[i++];
+          if (expr[i] === '+' || expr[i] === '-') n += expr[i++];
+          while (i < expr.length && /\d/.test(expr[i])) n += expr[i++];
+        }
+        toks.push({ t: 'num', v: n }); continue;
+      }
+      if (/[a-zA-Z_]/.test(ch)) {
+        let s = '';
+        while (i < expr.length && /[a-zA-Z0-9_]/.test(expr[i])) s += expr[i++];
+        toks.push({ t: 'id', v: s }); continue;
+      }
+      toks.push({ t: ch, v: ch }); i++;
+    }
+    toks.push({ t: 'EOF', v: '' });
+    let p = 0;
+    const peek = () => toks[p];
+    const next = () => toks[p++];
+    const isCmp = t => t.length === 1 && '><=!&|'.includes(t);
+    function parseCmp() {
+      let s = parseAdd();
+      while (isCmp(peek().t)) {
+        while (isCmp(peek().t)) s += next().t;   // >=, ==, &&, … arrive as single chars
+        s += parseAdd();
+      }
+      return s;
+    }
+    function parseAdd() { let s = parseMul(); while (peek().t === '+' || peek().t === '-') s += next().t + parseMul(); return s; }
+    function parseMul() { let s = parseUn(); while (peek().t === '*' || peek().t === '/' || peek().t === '%') s += next().t + parseUn(); return s; }
+    function parseUn() { if (peek().t === '-' || peek().t === '+') return next().t + parseUn(); return parsePow(); }
+    function parsePow() {
+      const base = parsePrim();
+      if (peek().t === '^') { next(); const exp = parseUn(); return '(' + base + '**' + exp + ')'; }
+      return base;
+    }
+    function parsePrim() {
+      const tok = peek();
+      if (tok.t === '(') {
+        next();
+        const inner = parseCmp();
+        if (peek().t === ')') next();
+        return '(' + inner + ')';
+      }
+      if (tok.t === 'num') {
+        next();
+        // Unit literal ("5 mm"): keep number+unit together so ^ binds the pair,
+        // with a space so the downstream unit regex still recognises it.
+        if (peek().t === 'id') return tok.v + ' ' + next().v;
+        return tok.v;
+      }
+      if (tok.t === 'id') {
+        next();
+        if (peek().t === '(') {
+          next();
+          const args = [];
+          if (peek().t !== ')') {
+            args.push(parseCmp());
+            while (peek().t === ',') { next(); args.push(parseCmp()); }
+          }
+          if (peek().t === ')') next();
+          return tok.v + '(' + args.join(',') + ')';
+        }
+        return tok.v;
+      }
+      if (tok.t === 'EOF') return '';
+      next();
+      return tok.v;
+    }
+    let out = parseCmp();
+    while (peek().t !== 'EOF') out += next().v; // pass any trailing tokens through verbatim
+    return out;
+  } catch (e) {
+    return expr.replace(/\^/g, '**');
+  }
+}
+
 function evalFormula(raw, variables) {
   // Built-in constants are available unless the user has defined a variable with the same name
   const variables_ = { ...MATH_CONSTS, ...variables };
@@ -749,7 +845,7 @@ function evalFormula(raw, variables) {
     if (varNames.has(name)) return m;
     return FUNS[up] ? up + m.slice(name.length) : m;
   });
-  expr = expr.replace(/\^/g, '**');
+  expr = transformPowers(expr);
   // Pre-process unit literals: "5kN" → 5000, "100mm" → 0.1, "1m" → 1 (SI values)
   {
     const unitSymsSorted = Object.keys(UNIT_CONVERSIONS).sort((a,b) => b.length - a.length);
@@ -1140,6 +1236,24 @@ function toLatex(rawFormula, subsMap) {
     return i === s.length ? s.slice(6, -7) : s;
   }
 
+  // Comparison / logical operators (needed for IF conditions like a>b).
+  const CMP_LATEX = {
+    '>': '\\gt', '<': '\\lt', '>=': '\\geq', '<=': '\\leq',
+    '==': '=', '=': '=', '!=': '\\neq',
+    '&&': '\\;\\text{and}\\;', '||': '\\;\\text{or}\\;',
+  };
+  const isCmpTok = t => t.length === 1 && '><=!&|'.includes(t);
+
+  function parseCompare() {
+    let left = parseExpr();
+    while (isCmpTok(peek().t)) {
+      let op = '';
+      while (isCmpTok(peek().t)) op += consume().t; // >=, ==, && arrive as single chars
+      left = left + ' ' + (CMP_LATEX[op] || op) + ' ' + parseExpr();
+    }
+    return left;
+  }
+
   function parseExpr() {
     let left = parseTerm();
     while (peek().t === '+' || peek().t === '-') {
@@ -1151,10 +1265,10 @@ function toLatex(rawFormula, subsMap) {
   }
 
   function parseTerm() {
-    let left = parsePower();
+    let left = parseUnary();
     while (peek().t === '*' || peek().t === '/') {
       const op = consume().t;
-      const right = parsePower();
+      const right = parseUnary();
       if (op === '/') {
         left = '\\dfrac{' + stripParens(left) + '}{' + stripParens(right) + '}';
       } else {
@@ -1164,8 +1278,16 @@ function toLatex(rawFormula, subsMap) {
     return left;
   }
 
+  // Unary sits ABOVE power so -x^2 renders as −x² (i.e. −(x²)), matching both
+  // maths convention and how transformPowers() evaluates it.
+  function parseUnary() {
+    if (peek().t === '-') { consume(); return '-' + parseUnary(); }
+    if (peek().t === '+') { consume(); return parseUnary(); }
+    return parsePower();
+  }
+
   function parsePower() {
-    let base = parseUnary();
+    let base = parsePrimary();
     if (peek().t === '^') {
       consume();
       const exp = parseUnary();
@@ -1174,17 +1296,11 @@ function toLatex(rawFormula, subsMap) {
     return base;
   }
 
-  function parseUnary() {
-    if (peek().t === '-') { consume(); return '-' + parsePrimary(); }
-    if (peek().t === '+') { consume(); return parsePrimary(); }
-    return parsePrimary();
-  }
-
   function parsePrimary() {
     const tok = peek();
     if (tok.t === '(') {
       consume();
-      const inner = parseExpr();
+      const inner = parseCompare();
       eat(')');
       return '\\left(' + inner + '\\right)';
     }
@@ -1195,8 +1311,8 @@ function toLatex(rawFormula, subsMap) {
         consume();
         const args = [];
         if (peek().t !== ')') {
-          args.push(parseExpr());
-          while (peek().t === ',') { consume(); args.push(parseExpr()); }
+          args.push(parseCompare());
+          while (peek().t === ',') { consume(); args.push(parseCompare()); }
         }
         eat(')');
         return latexFunc(tok.v.toUpperCase(), args);
@@ -1212,7 +1328,7 @@ function toLatex(rawFormula, subsMap) {
     return tok.v || '';
   }
 
-  try { return parseExpr(); }
+  try { return parseCompare(); }
   catch(e) { return formula; }
 }
 
