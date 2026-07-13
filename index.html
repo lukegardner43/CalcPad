@@ -232,6 +232,8 @@ body{
 .formula-chip{display:inline-flex;align-items:baseline;max-width:100%;cursor:default;user-select:none;vertical-align:middle}
 .formula-chip .katex{font-size:1em}
 .formula-chip.error{color:var(--rubine);font-style:italic}
+/* Brief highlight on an existing chip when a duplicate definition is attempted */
+.chip-flash{outline:2px solid var(--rubine);outline-offset:1px;border-radius:2px}
 .flhs{flex-shrink:0}
 .fseg-right{display:flex;flex-wrap:wrap;align-items:baseline;min-width:0}
 .fseg{display:inline-flex;align-items:baseline}
@@ -1360,8 +1362,14 @@ function renderVarChipContent(chip) {
         `<span class="vdc-val">${fmtNum(val)}</span>`;
     }
     chip.title = `Variable "${name}" = ${fmtNum(val)} — click value to edit`;
-    chip.querySelector('.vdc-val').addEventListener('click', () => startEditVarChip(chip));
   }
+}
+
+// Flash an existing chip to show why a duplicate definition was refused.
+function flashExistingChip(chip) {
+  chip.scrollIntoView({ block: 'nearest' });
+  chip.classList.add('chip-flash');
+  setTimeout(() => chip.classList.remove('chip-flash'), 1200);
 }
 
 function makeVarDefChip(name, val, expr, unit, siUnit, displayUnit) {
@@ -1395,7 +1403,10 @@ function startEditVarChip(chip) {
   inp.value = chip.dataset.varVal;
   chip.appendChild(inp);
   inp.focus(); inp.select();
+  let committed = false; // Enter triggers commit AND the resulting re-render blurs the input — run once
   function commit() {
+    if (committed) return;
+    committed = true;
     const newVal = parseFloat(inp.value);
     if (!isNaN(newVal)) {
       chip.dataset.varVal = newVal;
@@ -1408,7 +1419,7 @@ function startEditVarChip(chip) {
   }
   inp.addEventListener('keydown', e => {
     if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); commit(); }
-    if (e.key === 'Escape') { valSpan.style.display = ''; chip.classList.remove('editing-val'); inp.remove(); }
+    if (e.key === 'Escape') { committed = true; valSpan.style.display = ''; chip.classList.remove('editing-val'); inp.remove(); }
     e.stopPropagation();
   });
   inp.addEventListener('blur', commit);
@@ -2392,8 +2403,10 @@ document.addEventListener('keydown', e => {
       }
       const existing = document.querySelector(`.var-def-chip[data-var-name="${CSS.escape(varName)}"]`);
       if (existing) {
-        node.style.color = 'var(--rubine)';
-        setTimeout(() => { node.style.color = ''; }, 1200);
+        // node is a text node (no .style) — flash the existing chip instead so the
+        // user sees where the name is already defined.
+        e.preventDefault();
+        flashExistingChip(existing);
         return;
       }
       e.preventDefault();
@@ -2508,6 +2521,15 @@ function commitFormula(ed) {
   if (varEndMatch) {
     const varName = varEndMatch[2];
     const prefix  = varEndMatch[1] || '';
+    // Same duplicate guard as the keydown path: don't create a second chip for an
+    // existing name — flash the original definition and leave the text as typed.
+    const existingChip = document.querySelector(`.var-def-chip[data-var-name="${CSS.escape(varName)}"]`);
+    if (existingChip) {
+      flashExistingChip(existingChip);
+      formulaBuffer = null;
+      _editCommitPending = true; setTimeout(() => { _editCommitPending = false; }, 500);
+      return;
+    }
     let varVal, varUnit = '', varSiUnit = '', varExpr = formula;
     try { varVal = parseFloat(evalFormula(formula, vars).replace(/,/g, '')); } catch(e) { varVal = NaN; }
     if (isNaN(varVal)) {
@@ -2566,6 +2588,18 @@ document.addEventListener('click', e => {
     e.preventDefault();
     startEditFormulaChip(chip);
   }
+});
+
+// Click the value of a simple variable chip to edit it in place. Delegated
+// (like the formula-chip handler above) so chips restored from saved HTML —
+// which lose per-node listeners — stay editable after a reload.
+document.addEventListener('click', e => {
+  const valSpan = e.target.closest('.var-def-chip .vdc-val');
+  if (!valSpan) return;
+  const chip = valSpan.closest('.var-def-chip');
+  if (!chip.closest('.calc-area')) return;
+  if (chip.dataset.varExpr || chip.dataset.varUnit) return; // in-place edit is for plain numeric chips only
+  startEditVarChip(chip);
 });
 
 // Double-click a var-def chip to expand it back to editable text
