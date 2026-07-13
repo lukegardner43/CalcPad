@@ -576,7 +576,7 @@ body{
         <div id="editor" class="calc-area" contenteditable="true" spellcheck="true"
           data-placeholder="Begin calculations… type x = 42 then Enter to define a variable, =x^2+3 then Enter for a formula."></div>
       </div>
-      <div class="pg-footer">Alpha — updated 05.06.26</div>
+      <div class="pg-footer">Alpha — updated 13.07.26</div>
     </div>
 
     <!-- Sidebar (only shown next to page 1) -->
@@ -654,7 +654,7 @@ let preferredUnits = { m: 'm', N: 'N', kg: 'kg', Pa: 'Pa', 'N·m': 'N·m', s: 's
 
 // Footer "updated" date — the date the tool itself was last updated (build date),
 // shown as DD.MM.YY. Bump this whenever the app code changes.
-const FOOTER_TEXT = 'Alpha — updated 05.06.26';
+const FOOTER_TEXT = 'Alpha — updated 13.07.26';
 
 // ── Variable store ─────────────────────────────────────────
 
@@ -1678,6 +1678,10 @@ let formulaBuffer = null;
 // the "name = …" text being edited.
 let _editingVarDef = false;
 let _editCommitPending = false; // suppresses reflow for 500ms after commit/cancel
+// Table cell the caret currently sits in (see the selection-based table tracking
+// block below). Declared here because recomputeTableFormulas reads it and runs
+// during top-level init, before the tracking block's code executes.
+let _tblSelCell = null;
 
 
 
@@ -2316,9 +2320,11 @@ function syncUnitPrefPanel() {
 
 buildUnitPrefPanel();
 
-loadFromLocalStorage();
-rebuildVars();
-refreshAllTables();
+// NOTE: loadFromLocalStorage()/rebuildVars()/refreshAllTables() run at the very
+// END of the script. Restoring saved content re-evaluates table formulas and
+// chips, which touches const/let bindings declared further down (TBL_FN_RE,
+// activeCell, …) — calling them from here hit the temporal dead zone and
+// aborted the whole script whenever a saved table formula existed.
 
 // ── Toolbar helpers ───────────────────────────────────────────
 function fmt(cmd) {
@@ -2426,6 +2432,59 @@ formulaBuffer = null;
 document.addEventListener('keydown', e => {
   let ed = getActiveEditor();
   if (!ed) return;
+
+  // Enter/Tab inside a table cell: cells never truly receive focus (the outer
+  // .calc-area is the editing host) so the table can't handle its own keys.
+  // Enter commits the cell and moves down a row (Excel-like); Tab moves to the
+  // next/previous cell, appending a row from the last cell. Chip creation and
+  // the formula buffer never engage inside tables.
+  if ((e.key === 'Enter' || e.key === 'Tab') &&
+      document.getElementById('tblVarModal').style.display !== 'flex') {
+    const cell = caretTableCell();
+    if (cell) {
+      e.preventDefault();
+      const table = cell.closest('.calc-table');
+      let target = null;
+      if (e.key === 'Enter') {
+        const rows = Array.from(table.rows);
+        const ri = rows.indexOf(cell.closest('tr'));
+        const below = rows[ri + 1];
+        if (below) target = below.cells[Math.min(cell.cellIndex, below.cells.length - 1)];
+      } else {
+        const cells = Array.from(table.querySelectorAll('th,td'));
+        const idx = cells.indexOf(cell);
+        if (e.shiftKey) { if (idx > 0) target = cells[idx - 1]; }
+        else if (idx < cells.length - 1) target = cells[idx + 1];
+        else {
+          activeTable = table; activeCell = cell;
+          tblAddRowBelow();
+          const rows = Array.from(table.rows);
+          target = rows[rows.length - 1].cells[0];
+        }
+      }
+      // Update the tracked cell BEFORE committing so recomputeTableFormulas is
+      // free to write the committed cell's computed text.
+      _tblSelCell = target;
+      commitTableCell(cell);
+      if (target) {
+        activeTable = table; activeCell = target;
+        showTableToolbar(table, target);
+        if (target.dataset.formula && target.textContent !== target.dataset.formula)
+          target.textContent = target.dataset.formula;
+        placeCaretAtEnd(target);
+      } else {
+        // Enter on the last row: leave the table, placing the caret just after it.
+        let after = table.nextSibling;
+        if (!after) { after = document.createElement('p'); after.innerHTML = '<br>'; table.parentNode.appendChild(after); }
+        const r = document.createRange();
+        r.setStart(after, 0); r.collapse(true);
+        const s = window.getSelection();
+        s.removeAllRanges(); s.addRange(r);
+        hideTableToolbar();
+      }
+      return;
+    }
+  }
 
   // Backspace/Delete on an empty page (2+) removes the page — like deleting a blank
   // page in Word — and moves the cursor to the end of the previous page.
@@ -2544,6 +2603,14 @@ document.addEventListener('input', e => {
   isDirty = true; autoSave();
   clearTimeout(_rebuildTimer);
   _rebuildTimer = setTimeout(rebuildVars, 300);
+  // Typing inside a table cell: live-update dependent formula cells. The table's
+  // own input listener can't fire (input events target the outer editing host).
+  const tcell = caretTableCell();
+  if (tcell) {
+    const t = tcell.closest('.calc-table');
+    clearTimeout(t._recalcT);
+    t._recalcT = setTimeout(() => recomputeTableFormulas(t), 150);
+  }
   // Self-heal the var-def edit guard: once the caret is no longer in a "name = …"
   // text node, the edit is over (committed or abandoned) so re-enable reflow.
   if (_editingVarDef) {
@@ -2572,7 +2639,7 @@ document.addEventListener('input', e => {
     if (node.nodeType !== Node.TEXT_NODE) return;
     const text = node.textContent;
     const pos = range.startOffset;
-    if (text[pos - 1] === '=') {
+    if (text[pos - 1] === '=' && !tcell) { // table cells have their own = formulas
       let before = text[pos - 2];
       if (pos <= 1 || before === ' ' || before === '\n' || before === '\u00A0')
         formulaBuffer = '';
@@ -2943,8 +3010,9 @@ document.addEventListener('paste', e => {
   if (text) {
     e.preventDefault();
     setActiveEditor(ca);
-    // Mid-formula edit: insert as plain text and let the normal typing flow handle it
-    if (formulaBuffer !== null) { document.execCommand('insertText', false, text); return; }
+    // Mid-formula edit, or pasting into a table cell: insert as plain text —
+    // table formulas commit when the caret leaves the cell, not via chips.
+    if (formulaBuffer !== null || caretTableCell()) { document.execCommand('insertText', false, text); return; }
     insertPastedText(text);
     return;
   }
@@ -3095,14 +3163,10 @@ function hideTableToolbar() {
 }
 
 function attachTableHandlers(table) {
-  // focusin: desktop + iOS (fired when a cell receives focus via tap/keyboard)
-  table.addEventListener('focusin', e => {
-    const cell = e.target.closest('td,th'); if (!cell) return;
-    activeCell = cell; // keep in sync before showing
-    showTableToolbar(table, cell);
-    if (cell.dataset.formula) cell.textContent = cell.dataset.formula;
-  });
-  // click/touchend: belt-and-suspenders for iOS where focusin may be delayed
+  table.dataset.tblHandlers = '1'; // stop attachTableHandlersToArea attaching a second set
+  // Show the toolbar and reveal the raw formula on click/tap. The caret-tracking
+  // block below covers this too; the click handler is kept as belt-and-suspenders
+  // for taps that don't move the caret.
   table.addEventListener('click', e => {
     const cell = e.target.closest('td,th'); if (!cell) return;
     activeCell = cell;
@@ -3110,41 +3174,75 @@ function attachTableHandlers(table) {
     if (cell.dataset.formula && cell.textContent !== cell.dataset.formula)
       cell.textContent = cell.dataset.formula;
   });
-  table.addEventListener('focusout', e => {
-    const cell = e.target.closest('td,th');
-    // If a toolbar button is being pressed, skip cell processing — the toolbar
-    // action will set/update dataset.formula itself and call recomputeTableFormulas.
-    if (cell && !_tblBarActive) {
-      const txt = cell.textContent.trim();
-      if (/^=/.test(txt) && parseTableFormula(txt)) {
-        cell.dataset.formula = txt; cell.classList.add('tbl-calc');
-      } else {
-        delete cell.dataset.formula; delete cell.dataset.value; cell.classList.remove('tbl-calc');
-      }
-      recomputeTableFormulas(table);
-      rebuildVars();
-      isDirty = true; autoSave();
-    }
-    setTimeout(() => {
-      if (!_tblBarActive && !table.contains(document.activeElement) && !tblToolbar.contains(document.activeElement))
-        hideTableToolbar();
-    }, 200);
-  });
   table.addEventListener('input', () => {
-    // Live-update dependent formula cells as data is typed (skips the focused cell).
+    // Live-update dependent formula cells as data is typed (skips the cell being edited).
     clearTimeout(table._recalcT);
     table._recalcT = setTimeout(() => recomputeTableFormulas(table), 150);
   });
-  table.addEventListener('keydown', e => {
-    if (e.key !== 'Tab') return; e.preventDefault();
-    const cells = Array.from(table.querySelectorAll('th,td'));
-    let idx = cells.indexOf(document.activeElement);
-    if (idx === -1) return;
-    if (e.shiftKey) { if (idx > 0) cells[idx-1].focus(); }
-    else if (idx < cells.length - 1) cells[idx+1].focus();
-    else { tblAddRowBelow(); const nc = Array.from(table.querySelectorAll('td')); const fn = nc[nc.length - table.querySelector('tr').cells.length]; if (fn) fn.focus(); }
-  });
 }
+
+// ── Caret-based table cell tracking ───────────────────────────
+// The <td contenteditable> cells sit inside the page's own contenteditable
+// editor, so the browser keeps focus on the outer .calc-area — the cells never
+// receive focus themselves and focusin/focusout/keydown listeners on the table
+// never fire. Track the caret via selectionchange instead: commit a cell's
+// formula when the caret leaves it, and reveal the raw formula when it enters.
+function caretTableCell() {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return null;
+  let n = sel.getRangeAt(0).startContainer;
+  if (n.nodeType !== Node.ELEMENT_NODE) n = n.parentElement;
+  const cell = n && n.closest ? n.closest('.calc-table td, .calc-table th') : null;
+  return cell && cell.closest('.calc-area') ? cell : null;
+}
+
+// Register/clear a cell's formula from its current text — the caret-flow
+// equivalent of the old focusout handler.
+function commitTableCell(cell) {
+  const table = cell.closest('.calc-table');
+  if (!table) return;
+  const txt = cell.textContent.trim();
+  if (/^=/.test(txt) && parseTableFormula(txt)) {
+    cell.dataset.formula = txt; cell.classList.add('tbl-calc');
+  } else {
+    delete cell.dataset.formula; delete cell.dataset.value; cell.classList.remove('tbl-calc');
+  }
+  recomputeTableFormulas(table);
+  rebuildVars();
+  isDirty = true; autoSave();
+}
+
+function placeCaretAtEnd(el) {
+  const r = document.createRange();
+  r.selectNodeContents(el); r.collapse(false);
+  const sel = window.getSelection();
+  sel.removeAllRanges(); sel.addRange(r);
+}
+
+function revealCellFormula(cell) {
+  if (cell.dataset.formula && cell.textContent !== cell.dataset.formula) {
+    cell.textContent = cell.dataset.formula;
+    placeCaretAtEnd(cell);
+  }
+}
+
+document.addEventListener('selectionchange', () => {
+  const cell = caretTableCell();
+  if (cell === _tblSelCell) return;
+  const prev = _tblSelCell;
+  _tblSelCell = cell;
+  // Skip the commit while a toolbar button press is in flight — the action
+  // updates dataset.formula itself (same guard the old focusout flow used).
+  if (prev && prev.isConnected && !_tblBarActive) commitTableCell(prev);
+  if (cell) {
+    activeTable = cell.closest('.calc-table');
+    activeCell = cell;
+    showTableToolbar(activeTable, cell);
+    revealCellFormula(cell);
+  } else if (prev) {
+    hideTableToolbar();
+  }
+});
 function tblAddRowBelow() { if (!activeTable||!activeCell) return; const row=activeCell.closest('tr'); const cc=activeTable.rows[0].cells.length; const nr=document.createElement('tr'); for(let i=0;i<cc;i++){const td=document.createElement('td');td.contentEditable='true';nr.appendChild(td);} row.parentNode.insertBefore(nr,row.nextSibling); recomputeTableFormulas(activeTable); rebuildVars(); nr.cells[0].focus(); }
 function tblAddRowAbove() { if (!activeTable||!activeCell) return; const row=activeCell.closest('tr'); const cc=activeTable.rows[0].cells.length; const nr=document.createElement('tr'); for(let i=0;i<cc;i++){const td=document.createElement('td');td.contentEditable='true';nr.appendChild(td);} row.parentNode.insertBefore(nr,row); recomputeTableFormulas(activeTable); rebuildVars(); nr.cells[0].focus(); }
 function tblAddColRight() { if (!activeTable||!activeCell) return; const idx=activeCell.cellIndex; Array.from(activeTable.rows).forEach((row,ri)=>{const c=ri===0?document.createElement('th'):document.createElement('td');c.contentEditable='true';const ref=row.cells[idx+1]||null;row.insertBefore(c,ref?ref.nextSibling:null);}); recomputeTableFormulas(activeTable); rebuildVars(); }
@@ -3205,7 +3303,7 @@ function evalTableFormula(table, cell) {
   });
 
   let val;
-  if (!nums.length) val = (fn === 'count') ? 0 : 0;
+  if (!nums.length) val = 0; // no numeric contributors — every function shows 0
   else switch (fn) {
     case 'sum': val = nums.reduce((a, b) => a + b, 0); break;
     case 'avg': case 'average': case 'mean': val = nums.reduce((a, b) => a + b, 0) / nums.length; break;
@@ -3234,7 +3332,9 @@ function recomputeTableFormulas(table) {
       if (cell.dataset.value !== String(res.value)) changed = true;
       cell.dataset.value = String(res.value);
       cell.dataset.cunit = res.unit || '';
-      if (cell !== document.activeElement) cell.textContent = res.text; // don't clobber the cell being edited
+      // Don't clobber the cell being edited (tracked by caret, since cells never
+      // truly receive focus inside the contenteditable page).
+      if (cell !== document.activeElement && cell !== _tblSelCell) cell.textContent = res.text;
     });
     if (!changed) break;
   }
@@ -3641,6 +3741,13 @@ function triggerPrint() {
   if (_isIOS) { window.print(); return; }
   document.getElementById('printWarning').style.display = 'flex';
 }
+
+// ── Bootstrap ──────────────────────────────────────────────────
+// Restore autosaved content last, once every binding above is initialised
+// (see the note next to buildUnitPrefPanel()).
+loadFromLocalStorage();
+rebuildVars();
+refreshAllTables();
 </script>
 </body>
 </html>
