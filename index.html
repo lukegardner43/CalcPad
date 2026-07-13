@@ -1593,6 +1593,43 @@ function startEditVarDefChip(chip) {
   sel.addRange(range);
 }
 
+// Compute the on-screen value + unit for a formula result (result = the raw SI
+// string from evalFormula). Returns {val, unit} in display units, or
+// {mismatch: '<inferred unit>'} when outputUnit conflicts dimensionally with
+// the formula's inferred unit. Shared by chip rendering and Word export so the
+// exported text matches what the user sees, not the internal SI value.
+function formulaDisplayParts(formula, result, outputUnit) {
+  // Use full-precision float from result string so 2dp rounding doesn't corrupt unit conversion
+  const rawSI = parseFloat(String(result).replace(/,/g, ''));
+  if (isNaN(rawSI)) return { val: String(result), unit: '' }; // non-numeric result (TRUE/FALSE)
+  let resUnit = evalUnitExpr(formula, varUnits);
+  // Belt-and-suspenders: collapse fundamentally-dimensionless unit objects (e.g. kN/N).
+  if (resUnit && Object.keys(resUnit).length) {
+    const _fund = toFundamental(resUnit);
+    if (_fund !== null && !Object.keys(_fund).length) resUnit = {};
+  }
+  if (outputUnit) {
+    // Check that the specified unit is dimensionally compatible with the formula result
+    if (resUnit && Object.keys(resUnit).length) {
+      const specUnitObj = parseUnitStr(outputUnit);
+      if (Object.keys(specUnitObj).length) {
+        const resF = toFundamental(resUnit), specF = toFundamental(specUnitObj);
+        if (!resF || !specF || !unitObjEq(resF, specF)) return { mismatch: unitObjToStr(resUnit) };
+      }
+    }
+    const factor = getUnitConversionFactor(parseUnitStr(outputUnit));
+    return { val: fmtNumDisplay(factor !== null ? rawSI / factor : rawSI), unit: outputUnit };
+  }
+  if (resUnit && Object.keys(resUnit).length) {
+    const simplName  = simplifyUnitStr(resUnit);
+    const siBaseObj  = simplName ? parseUnitStr(simplName) : unitObjToSIBase(resUnit);
+    const prefObj    = applyUnitPreferences(siBaseObj);
+    const prefFactor = getUnitConversionFactor(prefObj);
+    return { val: fmtNumDisplay(prefFactor !== null ? rawSI / prefFactor : rawSI), unit: unitObjToStr(prefObj) };
+  }
+  return { val: fmtNumDisplay(rawSI), unit: '' };
+}
+
 function setFormulaContent(chip, formula, result, isError) {
   if (isError) {
     chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">=${formula} — ${result}</span>`;
@@ -1603,47 +1640,15 @@ function setFormulaContent(chip, formula, result, isError) {
   try {
     const lhs = toLatex(formula);
     const sub = toLatexSubstituted(formula, vars, varUnits);
-    // Use full-precision float from result string so 2dp rounding doesn't corrupt unit conversion
-    const rawSI = parseFloat(result.replace(/,/g, ''));
-    let resUnit = evalUnitExpr(formula, varUnits);
-    // Belt-and-suspenders: collapse fundamentally-dimensionless unit objects (e.g. kN/N).
-    if (resUnit && Object.keys(resUnit).length) {
-      const _fund = toFundamental(resUnit);
-      if (_fund !== null && !Object.keys(_fund).length) resUnit = {};
+    const parts = formulaDisplayParts(formula, result, outputUnit);
+    if (parts.mismatch) {
+      chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">unit mismatch: result is [${parts.mismatch}] not [${outputUnit}]</span>`;
+      chip.className = 'formula-chip error';
+      chip.title = `Unit mismatch: formula gives [${parts.mismatch}] but [${outputUnit}] was specified`;
+      return;
     }
-    let displayVal, unitSuffix = '';
-    if (outputUnit) {
-      // Check that the specified unit is dimensionally compatible with the formula result
-      if (resUnit && Object.keys(resUnit).length) {
-        const specUnitObj = parseUnitStr(outputUnit);
-        if (Object.keys(specUnitObj).length) {
-          const resF = toFundamental(resUnit), specF = toFundamental(specUnitObj);
-          if (!resF || !specF || !unitObjEq(resF, specF)) {
-            chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">unit mismatch: result is [${unitObjToStr(resUnit)}] not [${outputUnit}]</span>`;
-            chip.className = 'formula-chip error';
-            chip.title = `Unit mismatch: formula gives [${unitObjToStr(resUnit)}] but [${outputUnit}] was specified`;
-            return;
-          }
-        }
-      }
-      const unitObj = parseUnitStr(outputUnit);
-      const factor = getUnitConversionFactor(unitObj);
-      displayVal = fmtNumDisplay(factor !== null ? rawSI / factor : rawSI);
-      unitSuffix = unitToLatex(outputUnit);
-    } else {
-      if (resUnit && Object.keys(resUnit).length) {
-        const simplName  = simplifyUnitStr(resUnit);
-        const siBaseObj  = simplName ? parseUnitStr(simplName) : unitObjToSIBase(resUnit);
-        const prefObj    = applyUnitPreferences(siBaseObj);
-        const prefFactor = getUnitConversionFactor(prefObj);
-        displayVal = fmtNumDisplay(prefFactor !== null ? rawSI / prefFactor : rawSI);
-        unitSuffix = unitObjToLatex(prefObj);
-      } else {
-        displayVal = fmtNumDisplay(rawSI);
-        unitSuffix = '';
-      }
-    }
-    const rhs = numToLatex(displayVal) + unitSuffix;
+    const unitSuffix = parts.unit ? unitToLatex(parts.unit) : '';
+    const rhs = (isNaN(parseFloat(parts.val)) ? '\\text{' + parts.val + '}' : numToLatex(parts.val)) + unitSuffix;
     const kx = s => katex.renderToString(s, {displayMode: false, throwOnError: false, output: 'html'});
     chip.innerHTML =
       `<span class="fseg flhs">${kx(lhs)}</span>` +
@@ -3509,6 +3514,49 @@ function loadFile(input) {
   reader.readAsText(file); input.value = '';
 }
 
+// Display value + unit for a variable chip, mirroring what renderVarChipContent
+// shows on screen (converted display units, not the internal SI value).
+function varChipDisplayParts(chip) {
+  const val = parseFloat(chip.dataset.varVal);
+  const displayUnit = chip.dataset.varDisplayUnit || '';
+  const unit = chip.dataset.varUnit || '';
+  const expr = chip.dataset.varExpr || '';
+  if (displayUnit) {
+    const f = getUnitConversionFactor(parseUnitStr(displayUnit));
+    return { val: fmtNumDisplay(f !== null ? val / f : val), unit: displayUnit };
+  }
+  if (expr) {
+    let exprUnit = evalUnitExpr(expr, varUnits);
+    if (exprUnit && Object.keys(exprUnit).length) {
+      const fund = toFundamental(exprUnit);
+      if (fund !== null && !Object.keys(fund).length) exprUnit = {};
+    }
+    if (exprUnit && Object.keys(exprUnit).length) {
+      const simplName = simplifyUnitStr(exprUnit);
+      const siBaseObj = simplName ? parseUnitStr(simplName) : unitObjToSIBase(exprUnit);
+      const prefObj   = applyUnitPreferences(siBaseObj);
+      const f = getUnitConversionFactor(prefObj);
+      return { val: fmtNumDisplay(f !== null ? val / f : val), unit: unitObjToStr(prefObj) };
+    }
+  }
+  if (unit) {
+    if (chip.dataset.varOrigNum) return { val: chip.dataset.varOrigNum, unit };
+    const f = getUnitConversionFactor(parseUnitStr(unit));
+    return { val: fmtNumDisplay(f !== null ? val / f : val), unit };
+  }
+  return { val: fmtNum(val), unit: '' };
+}
+
+// Plain-text form of a variable chip for Word export: "name = expr = 33.68 kN"
+// or "w = 0.6 kN/m^2" — display units, matching the on-screen chip.
+function varChipExportText(chip) {
+  const name = chip.dataset.varName || '';
+  const expr = chip.dataset.varExpr || '';
+  const p = varChipDisplayParts(chip);
+  const rhs = p.val + (p.unit ? ' ' + p.unit : '');
+  return expr ? `${name} = ${expr} = ${rhs}` : `${name} = ${rhs}`;
+}
+
 async function exportWord() {
   closeFileMenu();
   if (typeof docx === 'undefined') { alert('Word export library not loaded.'); return; }
@@ -3525,8 +3573,18 @@ async function exportWord() {
       let tag=node.tagName.toLowerCase(),nf={...fmt};
       if(tag==='b'||tag==='strong')nf.bold=true;if(tag==='i'||tag==='em')nf.italics=true;
       if(tag==='u')nf.underline={};if(tag==='s'||tag==='strike')nf.strike=true;
-      if(node.classList&&node.classList.contains('formula-chip')){const r=node.querySelector('.fc-res,.katex-html');const t=r?r.textContent.trim():node.textContent.trim();if(t)runs.push(new TextRun({text:t,italics:true,...fmt}));return;}
-      if(node.classList&&node.classList.contains('var-def-chip')){const t=node.dataset.varExpr?node.dataset.varName+'='+node.dataset.varExpr+'='+node.dataset.varVal:node.dataset.varName+'='+node.dataset.varVal;if(t)runs.push(new TextRun({text:t,italics:true,...fmt}));return;}
+      if(node.classList&&node.classList.contains('formula-chip')){
+        // Export display values (converted units), not raw KaTeX text / SI internals.
+        const f=node.dataset.formula;let t='';
+        if(f){
+          let res,isErr=false;
+          try{res=evalFormula(f,vars);}catch(e){res=e.message||'Error';isErr=true;}
+          if(isErr){t='='+f+' — '+res;}
+          else{const p=formulaDisplayParts(f,res,node.dataset.formulaUnit||'');
+            t=p.mismatch?('='+f+' — unit mismatch ['+p.mismatch+']'):('='+f+' = '+p.val+(p.unit?' '+p.unit:''));}
+        }else t=node.textContent.trim();
+        if(t)runs.push(new TextRun({text:t,italics:true,...fmt}));return;}
+      if(node.classList&&node.classList.contains('var-def-chip')){const t=varChipExportText(node);if(t)runs.push(new TextRun({text:t,italics:true,...fmt}));return;}
       for(const c of node.childNodes)walk(c,nf);
     } walk(el,{}); return runs;
   }
