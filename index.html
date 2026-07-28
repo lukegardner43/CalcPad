@@ -597,8 +597,15 @@ body{
         <div class="sref-i"><span>=x^y or POW(x,y)</span></div>
         <div class="sref-i"><span>=IF(cond,t,f)</span></div>
         <div class="sref-i"><span>=LOG(x)/LOG(x,b)</span></div>
+        <div class="sref-i"><span>=EXP(x)</span></div>
         <div class="sref-i"><span>=PERCENT(p,w)</span></div>
         <div class="sref-i"><span>=PI() / E()</span></div>
+        <div class="sref-i"><span>=SIN/COS/TAN(x)</span></div>
+        <div class="sref-i"><span>=ASIN/ACOS/ATAN(x)</span></div>
+        <div class="sref-i"><span>=ATAN2(y,x)</span></div>
+        <div class="sref-i"><span>=SINH/COSH/TANH(x)</span></div>
+        <div class="sref-i"><span>=DEG(x) / RAD(x)</span></div>
+        <div class="sref-i"><span>angles in rad — use 30deg</span></div>
       </div>
     </div>
 
@@ -649,8 +656,9 @@ const UNIT_PREF_GROUPS = [
   { label: 'Stress',   si: 'Pa',  opts: ['Pa','kPa','kN/m²','MPa','N/mm²','GPa'] },
   { label: 'Moment',   si: 'N·m', opts: ['N·mm','N·m','kN·mm','kN·m','MN·m'] },
   { label: 'Time',     si: 's',   opts: ['s','ms','min','hr'] },
+  { label: 'Angle',    si: 'rad', opts: ['rad','deg'] },
 ];
-let preferredUnits = { m: 'm', N: 'N', kg: 'kg', Pa: 'Pa', 'N·m': 'N·m', s: 's' }; // defaults = SI
+let preferredUnits = { m: 'm', N: 'N', kg: 'kg', Pa: 'Pa', 'N·m': 'N·m', s: 's', rad: 'rad' }; // defaults = SI
 
 // Footer "updated" date — the date the tool itself was last updated (build date),
 // shown as DD.MM.YY. Bump this whenever the app code changes.
@@ -732,7 +740,32 @@ const FUNS = {
   MOD:     (a,b) => a%b,
   LOG:     (x,b) => b ? Math.log(x)/Math.log(b) : Math.log(x),
   PERCENT: (p,w) => (p/w)*100,
+  EXP:     x => Math.exp(x),
+  // Trigonometry. Angles are in radians, matching the unit system: a "deg"
+  // literal or variable is converted to radians before it reaches these
+  // (30deg → 0.5236), so SIN(30deg) and SIN(theta) both work. Use DEG()/RAD()
+  // to convert a bare number, e.g. DEG(ATAN(0.5)) → 26.57.
+  SIN:     x => Math.sin(x),
+  COS:     x => Math.cos(x),
+  TAN:     x => Math.tan(x),
+  ASIN:    x => Math.asin(x),
+  ACOS:    x => Math.acos(x),
+  ATAN:    x => Math.atan(x),
+  ATAN2:   (y,x) => Math.atan2(y,x),
+  SINH:    x => Math.sinh(x),
+  COSH:    x => Math.cosh(x),
+  TANH:    x => Math.tanh(x),
+  DEG:     x => x * 180 / Math.PI,
+  RAD:     x => x * Math.PI / 180,
 };
+
+// Functions whose result is always dimensionless, so a surrounding unit
+// expression can keep reasoning instead of giving up (e.g. SIN(a)*5m → m).
+// Everything else stays "unknown" because its unit depends on its arguments.
+const DIMENSIONLESS_FUNS = new Set([
+  'SIN','COS','TAN','ASIN','ACOS','ATAN','ATAN2','SINH','COSH','TANH',
+  'EXP','LOG','DEG','RAD','COUNT','PERCENT',
+]);
 
 const MATH_CONSTS = { pi: Math.PI };
 
@@ -861,7 +894,9 @@ function evalFormula(raw, variables) {
   const vnames = Object.keys(variables_).sort((a,b) => b.length - a.length);
   for (const vn of vnames)
     expr = expr.replace(new RegExp(`\\b${vn}\\b`, 'g'), `(${variables_[vn]})`);
-  let safe = expr.replace(/\b([A-Z_]+)\s*\(/g, (_,nm) => {
+  // [A-Z_][A-Z0-9_]* — the trailing digits matter: a bare [A-Z_]+ never matched
+  // ATAN2( , so it survived as a bare identifier and threw "ATAN2 is not defined".
+  let safe = expr.replace(/\b([A-Z_][A-Z0-9_]*)\s*\(/g, (_,nm) => {
     if (FUNS[nm]) return `__F.${nm}(`;
     throw new Error(`Unknown: ${nm}`);
   });
@@ -908,6 +943,20 @@ function extractValueAndUnit(exprStr) {
   const numVal = parseFloat(m[1]);
   if (isNaN(numVal)) return null;
   return { val: numVal, numStr: m[1], unit: m[2].trim() };
+}
+
+// True value+unit literal ("2.4 m", "30 deg", "0.6 kN/m2") — i.e. the WHOLE
+// expression is one number followed by a real unit, with nothing else in it.
+// Such a definition is a value, not a formula: storing it as an expression made
+// chips render the SI number twice ("B = 2.4 m = 2.4 m") and, for angles, show
+// bare radians ("θ = 30deg = 0.52") because rad collapses to dimensionless.
+function literalValueUnit(exprStr) {
+  const ue = extractValueAndUnit(exprStr);
+  if (!ue) return null;
+  const obj = parseUnitStr(ue.unit);
+  if (!Object.keys(obj).length) return null;      // trailing text isn't a unit
+  if (getUnitConversionFactor(obj) === null) return null; // unknown symbol
+  return ue;
 }
 
 // ── Unit algebra helpers ───────────────────────────────────
@@ -996,7 +1045,7 @@ function evalUnitExpr(formula, varUnitsMap) {
   function parseTerm(){let l=parseUnary();while(peek().t==='*'||peek().t==='/'){const op=consume().t;const r=parseUnary();l=op==='*'?unitMul(l,r):unitDiv(l,r);}return l;}
   function parseUnary(){if(peek().t==='-'||peek().t==='+'){consume();return parseUnary();}return parsePower();}
   function parsePower(){const base=parsePrimary();if(peek().t==='^'){consume();let sign=1;if(peek().t==='-'){consume();sign=-1;}else if(peek().t==='+')consume();if(peek().t==='num'){const n=parseFloat(consume().v)*sign;return unitPow(base,n);}parseUnary();return null;}return base;}
-  function parsePrimary(){const tok=peek();if(tok.t==='('){consume();const r=parseExpr();eat(')');return r;}if(tok.t==='num'){consume();if(peek().t==='id'&&Object.prototype.hasOwnProperty.call(UNIT_CONVERSIONS,peek().v)){const u=consume().v;return parseUnitStr(UNIT_SI_BASE[u]||u);}return{};}if(tok.t==='id'){consume();if(peek().t==='('){consume();let d=1;while(d>0&&peek().t!=='EOF'){const t=consume();if(t.t==='(')d++;else if(t.t===')')d--;}return null;}const u=varUnitsMap[tok.v];if(u)return parseUnitStr(u);if(Object.prototype.hasOwnProperty.call(vars,tok.v))return{};return{};}consume();return null;}
+  function parsePrimary(){const tok=peek();if(tok.t==='('){consume();const r=parseExpr();eat(')');return r;}if(tok.t==='num'){consume();if(peek().t==='id'&&Object.prototype.hasOwnProperty.call(UNIT_CONVERSIONS,peek().v)){const u=consume().v;return parseUnitStr(UNIT_SI_BASE[u]||u);}return{};}if(tok.t==='id'){const fn=tok.v.toUpperCase();consume();if(peek().t==='('){consume();let d=1;while(d>0&&peek().t!=='EOF'){const t=consume();if(t.t==='(')d++;else if(t.t===')')d--;}return DIMENSIONLESS_FUNS.has(fn)?{}:null;}const u=varUnitsMap[tok.v];if(u)return parseUnitStr(u);if(Object.prototype.hasOwnProperty.call(vars,tok.v))return{};return{};}consume();return null;}
   try{
     const result = parseExpr();
     if (result && Object.keys(result).length) {
@@ -1080,6 +1129,10 @@ function applyUnitPreferences(siBaseObj) {
       const pref = preferredUnits[si] || si;
       if (pref === si) continue; // user hasn't changed this group — skip group match
       const groupFund = toFundamental(parseUnitStr(si));
+      // Skip dimensionless groups (Angle): their fundamental is {}, which would
+      // match EVERY dimensionless quantity and stamp an angle unit on it. Those
+      // are handled by the component-wise substitution below (rad → deg).
+      if (groupFund && !Object.keys(groupFund).length) continue;
       if (groupFund && unitObjEq(fund, groupFund)) {
         return parseUnitStr(pref); // e.g. {MPa:1} when Pressure=MPa
       }
@@ -1220,6 +1273,14 @@ function toLatex(rawFormula, subsMap) {
       case 'AVG':     return '\\dfrac{' + args.join(' + ') + '}{' + args.length + '}';
       case 'IF':      return '\\begin{cases}' + args[1] + ' & \\text{if } ' + args[0] + ' \\\\ ' + (args[2]||'0') + ' & \\text{otherwise}\\end{cases}';
       case 'ROUND':   return '\\text{round}\\!\\left(' + args.join(', ') + '\\right)';
+      case 'EXP':     return 'e^{' + stripParens(args[0]) + '}';
+      case 'SIN': case 'COS': case 'TAN':
+      case 'SINH': case 'COSH': case 'TANH':
+        return '\\' + up.toLowerCase() + '\\!\\left(' + args[0] + '\\right)';
+      case 'ASIN':    return '\\arcsin\\!\\left(' + args[0] + '\\right)';
+      case 'ACOS':    return '\\arccos\\!\\left(' + args[0] + '\\right)';
+      case 'ATAN':    return '\\arctan\\!\\left(' + args[0] + '\\right)';
+      case 'ATAN2':   return '\\arctan\\!\\left(\\dfrac{' + stripParens(args[0]) + '}{' + stripParens(args[1]) + '}\\right)';
       default:        return '\\operatorname{' + name.toLowerCase() + '}\\!\\left(' + args.join(', ') + '\\right)';
     }
   }
@@ -1304,7 +1365,22 @@ function toLatex(rawFormula, subsMap) {
       eat(')');
       return '\\left(' + inner + '\\right)';
     }
-    if (tok.t === 'num') { consume(); return tok.v; }
+    if (tok.t === 'num') {
+      consume();
+      // Inline unit literal ("5mm", "30 deg"): bind the unit to the number.
+      // Without this the parser stopped at the unit identifier and returned only
+      // the digits, so "=5mm + 3mm" rendered as just "5". A variable of the same
+      // name wins over the unit, matching how evalFormula resolves the ambiguity.
+      const nxt = peek();
+      if (nxt.t === 'id' &&
+          Object.prototype.hasOwnProperty.call(UNIT_CONVERSIONS, nxt.v) &&
+          !(subsMap && Object.prototype.hasOwnProperty.call(subsMap, nxt.v)) &&
+          !Object.prototype.hasOwnProperty.call(vars, nxt.v)) {
+        consume();
+        return tok.v + unitToLatex(nxt.v);
+      }
+      return tok.v;
+    }
     if (tok.t === 'id') {
       consume();
       if (peek().t === '(') {
@@ -2542,6 +2618,17 @@ document.addEventListener('keydown', e => {
       const dispUnitMatch = exprStr.match(/^(.*?)\s*\[([^\]]+)\]\s*$/);
       if (dispUnitMatch && dispUnitMatch[1].trim()) { exprStr = dispUnitMatch[1].trim(); dispUnit = dispUnitMatch[2].trim(); }
       let val, unit = '', siUnit = '';
+      // A plain "30 deg" style literal is a value — keep the unit the user typed
+      // so the chip reads "θ = 30 deg" rather than a converted SI number.
+      const lit = literalValueUnit(exprStr);
+      if (lit) {
+        unit = lit.unit; exprStr = lit.numStr;
+        const conv = applyUnitConversion(lit.val, unit);
+        if (conv) { val = conv.siVal; siUnit = conv.siUnitStr; }
+        else { val = lit.val; siUnit = unit; }
+        commitVarDefChecked(node, varName, val, exprStr, prefix, unit, siUnit, dispUnit, e);
+        return;
+      }
       try {
         val = parseFloat(evalFormula(exprStr, vars).replace(/,/g, ''));
         if (isNaN(val)) throw new Error('NaN');
@@ -2581,16 +2668,7 @@ document.addEventListener('keydown', e => {
         if (conv) { val = conv.siVal; siUnit = conv.siUnitStr; }
         else { val = ue.val; siUnit = unit; }
       }
-      const existing = document.querySelector(`.var-def-chip[data-var-name="${CSS.escape(varName)}"]`);
-      if (existing) {
-        // node is a text node (no .style) — flash the existing chip instead so the
-        // user sees where the name is already defined.
-        e.preventDefault();
-        flashExistingChip(existing);
-        return;
-      }
-      e.preventDefault();
-      commitVarDef(node, varName, val, exprStr, prefix, unit, siUnit, dispUnit);
+      commitVarDefChecked(node, varName, val, exprStr, prefix, unit, siUnit, dispUnit, e);
     }
   }
 }, true);
@@ -2719,14 +2797,24 @@ function commitFormula(ed) {
       return;
     }
     let varVal, varUnit = '', varSiUnit = '', varExpr = formula;
-    try { varVal = parseFloat(evalFormula(formula, vars).replace(/,/g, '')); } catch(e) { varVal = NaN; }
-    if (isNaN(varVal)) {
-      const ue = extractValueAndUnit(formula);
-      if (ue) {
-        varUnit = ue.unit; varExpr = ue.numStr;
-        const conv = applyUnitConversion(ue.val, varUnit);
-        if (conv) { varVal = conv.siVal; varSiUnit = conv.siUnitStr; }
-        else { varVal = ue.val; varSiUnit = varUnit; }
+    // A whole-expression value+unit literal keeps the unit as typed (see
+    // literalValueUnit) instead of being stored as a formula.
+    const lit = literalValueUnit(formula);
+    if (lit) {
+      varUnit = lit.unit; varExpr = lit.numStr;
+      const conv = applyUnitConversion(lit.val, varUnit);
+      if (conv) { varVal = conv.siVal; varSiUnit = conv.siUnitStr; }
+      else { varVal = lit.val; varSiUnit = varUnit; }
+    } else {
+      try { varVal = parseFloat(evalFormula(formula, vars).replace(/,/g, '')); } catch(e) { varVal = NaN; }
+      if (isNaN(varVal)) {
+        const ue = extractValueAndUnit(formula);
+        if (ue) {
+          varUnit = ue.unit; varExpr = ue.numStr;
+          const conv = applyUnitConversion(ue.val, varUnit);
+          if (conv) { varVal = conv.siVal; varSiUnit = conv.siUnitStr; }
+          else { varVal = ue.val; varSiUnit = varUnit; }
+        }
       }
     }
     if (!isNaN(varVal)) {
@@ -2798,6 +2886,15 @@ document.addEventListener('dblclick', e => {
     startEditVarDefChip(chip);
   }
 });
+
+// commitVarDef guarded by the duplicate-name check. node is a text node (no
+// .style), so a clash flashes the existing chip rather than colouring the text.
+function commitVarDefChecked(node, name, val, expr, prefix, unit, siUnit, dispUnit, e) {
+  e.preventDefault();
+  const existing = document.querySelector(`.var-def-chip[data-var-name="${CSS.escape(name)}"]`);
+  if (existing) { flashExistingChip(existing); return; }
+  commitVarDef(node, name, val, expr, prefix, unit, siUnit, dispUnit);
+}
 
 function commitVarDef(textNode, name, val, expr, prefix, unit, siUnit, displayUnit) {
   _editingVarDef = false;
@@ -2931,7 +3028,14 @@ function pasteLineToFragment(rawLine, wvars, wunits, taken) {
     if (taken.has(varName)) { frag.appendChild(document.createTextNode(rawLine)); return frag; }
 
     let val, unit = '', siUnit = '', ok = false;
-    try {
+    const lit = literalValueUnit(exprStr);
+    if (lit) {
+      unit = lit.unit; exprStr = lit.numStr;
+      const conv = applyUnitConversion(lit.val, unit);
+      if (conv) { val = conv.siVal; siUnit = conv.siUnitStr; }
+      else { val = lit.val; siUnit = unit; }
+      ok = true;
+    } else try {
       val = parseFloat(evalFormula(exprStr, wvars).replace(/,/g, ''));
       if (isNaN(val)) throw new Error('NaN');
       const inferred = evalUnitExpr(exprStr, wunits);
