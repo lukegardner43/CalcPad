@@ -1804,16 +1804,20 @@ function formulaDisplayParts(formula, result, outputUnit) {
     if (_fund !== null && !Object.keys(_fund).length) resUnit = {};
   }
   if (outputUnit) {
-    // Check that the specified unit is dimensionally compatible with the formula result
     if (resUnit && Object.keys(resUnit).length) {
+      // The expression already carries a dimension, so [unit] just says how to
+      // display it. Check they're compatible, then convert the SI value.
       const specUnitObj = parseUnitStr(outputUnit);
       if (Object.keys(specUnitObj).length) {
         const resF = toFundamental(resUnit), specF = toFundamental(specUnitObj);
         if (!resF || !specF || !unitObjEq(resF, specF)) return { mismatch: unitObjToStr(resUnit) };
       }
+      const factor = getUnitConversionFactor(specUnitObj);
+      return { val: fmtNumDisplay(factor !== null ? rawSI / factor : rawSI), unit: outputUnit };
     }
-    const factor = getUnitConversionFactor(parseUnitStr(outputUnit));
-    return { val: fmtNumDisplay(factor !== null ? rawSI / factor : rawSI), unit: outputUnit };
+    // Dimensionless arithmetic ("=25.4 [mm]", "=4.6/100 [kN/m]"): there is no
+    // unit to convert FROM, so [unit] states what the number already is.
+    return { val: fmtNumDisplay(rawSI), unit: outputUnit };
   }
   if (resUnit && Object.keys(resUnit).length) {
     const simplName  = simplifyUnitStr(resUnit);
@@ -2599,8 +2603,20 @@ function rebuildVars() {
                 const conv = applyUnitConversion(v, unit);
                 if (conv) siV = conv.siVal;
               } else if (dispUnit) {
-                const conv = applyUnitConversion(v, dispUnit);
-                if (conv) { siV = conv.siVal; varUnits[name] = conv.siUnitStr; }
+                const inf = evalUnitExpr(expr, varUnits);
+                if (inf && Object.keys(inf).length) {
+                  // The expression already has a dimension, so evalFormula has
+                  // returned SI and [unit] is display-only. Converting here
+                  // double-converted it: "d = hh - bb [mm]" stored 0.0002 m
+                  // instead of 0.2 m and showed 0.2 mm instead of 200 mm — and
+                  // the corrupted value fed straight into anything using d.
+                  varUnits[name] = simplifyUnitStr(inf) || unitObjToStr(inf);
+                } else {
+                  // Dimensionless arithmetic: [unit] declares what the number is
+                  // in, e.g. "w = 4.6/100 [kN/m]" → 46 N/m.
+                  const conv = applyUnitConversion(v, dispUnit);
+                  if (conv) { siV = conv.siVal; varUnits[name] = conv.siUnitStr; }
+                }
               } else {
                 const inf = evalUnitExpr(expr, varUnits);
                 if (inf && Object.keys(inf).length) varUnits[name] = simplifyUnitStr(inf) || unitObjToStr(inf);
