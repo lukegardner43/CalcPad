@@ -1089,7 +1089,62 @@ function evalUnitExpr(formula, varUnitsMap) {
   function parseTerm(){let l=parseUnary();while(peek().t==='*'||peek().t==='/'){const op=consume().t;const r=parseUnary();l=op==='*'?unitMul(l,r):unitDiv(l,r);}return l;}
   function parseUnary(){if(peek().t==='-'||peek().t==='+'){consume();return parseUnary();}return parsePower();}
   function parsePower(){const base=parsePrimary();if(peek().t==='^'){consume();let sign=1;if(peek().t==='-'){consume();sign=-1;}else if(peek().t==='+')consume();if(peek().t==='num'){const n=parseFloat(consume().v)*sign;return unitPow(base,n);}parseUnary();return null;}return base;}
-  function parsePrimary(){const tok=peek();if(tok.t==='('){consume();const r=parseExpr();eat(')');return r;}if(tok.t==='num'){consume();if(peek().t==='id'&&Object.prototype.hasOwnProperty.call(UNIT_CONVERSIONS,peek().v)){const u=consume().v;return parseUnitStr(UNIT_SI_BASE[u]||u);}return{};}if(tok.t==='id'){const fn=tok.v.toUpperCase();consume();if(peek().t==='('){consume();let d=1;while(d>0&&peek().t!=='EOF'){const t=consume();if(t.t==='(')d++;else if(t.t===')')d--;}return DIMENSIONLESS_FUNS.has(fn)?{}:null;}const u=varUnitsMap[tok.v];if(u)return parseUnitStr(u);if(Object.prototype.hasOwnProperty.call(vars,tok.v))return{};return{};}consume();return null;}
+  function parsePrimary(){const tok=peek();if(tok.t==='('){consume();const r=parseExpr();eat(')');return r;}if(tok.t==='num'){consume();if(peek().t==='id'&&Object.prototype.hasOwnProperty.call(UNIT_CONVERSIONS,peek().v)){const u=consume().v;return parseUnitStr(UNIT_SI_BASE[u]||u);}return{};}if(tok.t==='id'){const fn=tok.v.toUpperCase();consume();if(peek().t==='(')return parseCall(fn);const u=varUnitsMap[tok.v];if(u)return parseUnitStr(u);if(Object.prototype.hasOwnProperty.call(vars,tok.v))return{};return{};}consume();return null;}
+
+  // Consume tokens up to the ')' closing the call we are inside.
+  function skipToClose(){let d=1;while(peek().t!=='EOF'){const t=consume();if(t.t==='(')d++;else if(t.t===')'){d--;if(!d)return;}}}
+  // Consume an argument we can't model (e.g. a comparison in IF's condition),
+  // stopping before the ',' that ends it or the ')' that ends the call.
+  function skipArg(){let d=0;while(peek().t!=='EOF'){const t=peek();if(d===0&&(t.t===','||t.t===')'))return;consume();if(t.t==='(')d++;else if(t.t===')')d--;}}
+
+  // Unit of a function call. The caret is on '(' .
+  function parseCall(fn){
+    consume(); // '('
+    if(fn==='IF'){skipArg();eat(',');} // condition carries no unit into the result
+    const args=[];
+    if(peek().t!==')'){
+      args.push(parseExpr());
+      while(peek().t===','){consume();args.push(parseExpr());}
+    }
+    if(peek().t!==')'){skipToClose();return null;} // unmodelled syntax — give up safely
+    consume(); // ')'
+    return funcUnit(fn,args);
+  }
+
+  // Units that agree across a list, ignoring bare numbers ({}) so idioms like
+  // MAX(0, F) keep the unit of F. Conflicting real units give null.
+  function commonUnit(list){
+    let acc=null;
+    for(const u of list){
+      if(u===null)return null;                 // an argument we couldn't resolve
+      if(!Object.keys(u).length)continue;      // plain number — compatible with anything
+      if(acc===null){acc=u;continue;}
+      if(!eq(acc,u)){const a=toFundamental(acc),b=toFundamental(u);if(!a||!b||!eq(a,b))return null;}
+    }
+    return acc||{};
+  }
+
+  function funcUnit(fn,args){
+    if(DIMENSIONLESS_FUNS.has(fn))return{};
+    switch(fn){
+      // Result takes the unit of its operands
+      case 'MIN':case 'MAX':case 'SUM':case 'AVG':          return commonUnit(args);
+      case 'IF':                                            return commonUnit(args); // condition already skipped
+      // Result keeps the first operand's unit (extra args are plain numbers)
+      case 'ABS':case 'FLOOR':case 'CEIL':case 'ROUND':case 'MOD':
+        return args.length?args[0]:{};
+      case 'SQRT':{
+        const u=args[0];
+        if(!u)return null;
+        const r=unitPow(u,0.5);
+        // Only meaningful if it leaves whole exponents: sqrt(m^2) → m, sqrt(m) → null
+        return r&&Object.values(r).every(Number.isInteger)?r:null;
+      }
+      case 'POW':return args[0]&&!Object.keys(args[0]).length?{}:null; // exponent unknown here
+      case 'PI':case 'E':return{};
+      default:return null;
+    }
+  }
   try{
     const result = parseExpr();
     if (result && Object.keys(result).length) {
@@ -2889,6 +2944,9 @@ function commitFormula(ed) {
       flashExistingChip(existingChip);
       formulaBuffer = null;
       _editCommitPending = true; setTimeout(() => { _editCommitPending = false; }, 500);
+      // The caller already swallowed this Enter; put the line break back so the
+      // refused text doesn't run into whatever is typed next.
+      document.execCommand('insertLineBreak');
       return;
     }
     let varVal, varUnit = '', varSiUnit = '', varExpr = formula;
@@ -2992,9 +3050,12 @@ document.addEventListener('dblclick', e => {
 // commitVarDef guarded by the duplicate-name check. node is a text node (no
 // .style), so a clash flashes the existing chip rather than colouring the text.
 function commitVarDefChecked(node, name, val, expr, prefix, unit, siUnit, dispUnit, e) {
-  e.preventDefault();
   const existing = document.querySelector(`.var-def-chip[data-var-name="${CSS.escape(name)}"]`);
+  // Refuse the duplicate but let Enter through, so the line still breaks and the
+  // user can carry on and rename later. Swallowing it trapped them: every Enter
+  // re-matched the same duplicate, so no new line could be started.
   if (existing) { flashExistingChip(existing); return; }
+  e.preventDefault();
   commitVarDef(node, name, val, expr, prefix, unit, siUnit, dispUnit);
 }
 
