@@ -702,7 +702,10 @@ const UNIT_PREF_GROUPS = [
   { label: 'Time',     si: 's',   opts: ['s','ms','min','hr'] },
   { label: 'Angle',    si: 'rad', opts: ['rad','deg'] },
 ];
-let preferredUnits = { m: 'm', N: 'N', kg: 'kg', Pa: 'Pa', 'N·m': 'N·m', s: 's', rad: 'rad' }; // defaults = SI
+// Defaults are SI, except moments: a bare "N·m" result is almost never what a
+// structural calc wants, so the Moment group starts at kN·m. Saved documents
+// keep whatever they stored, since loading merges over these.
+let preferredUnits = { m: 'm', N: 'N', kg: 'kg', Pa: 'Pa', 'N·m': 'kN·m', s: 's', rad: 'rad' };
 
 // Footer "updated" date — the date the tool itself was last updated (build date),
 // shown as DD.MM.YY. Bump this whenever the app code changes.
@@ -1033,17 +1036,34 @@ function unitPow(u, n) {
   if (!u||isNaN(n)) return null;
   const r={}; for(const[s,e]of Object.entries(u)){const ne=e*n; if(ne)r[s]=ne;} return r;
 }
+// Display order within a compound unit: named derived units (force, stress,
+// energy) first, then mass, length, time, angle. Sorting alphabetically put the
+// length first, so a moment came out as "m·N" — which reads as milli-Newtons —
+// and MN·m came out as "m·MN". Ties fall back to alphabetical.
+const _UNIT_ORDER = {
+  N:0, kN:0, MN:0,
+  Pa:1, kPa:1, MPa:1, GPa:1,
+  J:2, W:2, Hz:2,
+  kg:4, g:4, t:4,
+  m:5, mm:5, cm:5, km:5,
+  s:6, ms:6, min:6, hr:6,
+  rad:7, deg:7,
+};
+const _unitRank = s => (_UNIT_ORDER[s] !== undefined ? _UNIT_ORDER[s] : 3);
+const _unitCmp = ([a],[b]) => _unitRank(a) - _unitRank(b) || a.localeCompare(b);
+
 // Format {m:2, s:-2} as LaTeX "\,\text{m}^{2}/\text{s}^{2}"
 function unitObjToLatex(u) {
   if (!u) return '';
   const entries = Object.entries(u);
   if (!entries.length) return '';
-  const pos = entries.filter(([,e])=>e>0).sort(([a],[b])=>a.localeCompare(b));
-  const neg = entries.filter(([,e])=>e<0).sort(([a],[b])=>a.localeCompare(b));
+  const pos = entries.filter(([,e])=>e>0).sort(_unitCmp);
+  const neg = entries.filter(([,e])=>e<0).sort(_unitCmp);
   const fmt = (sym,exp) => { const s='\\text{'+sym.replace(/[{}\\]/g,'')+'}'; const ae=Math.abs(exp); return ae===1?s:s+'^{'+ae+'}'; };
-  const posStr = pos.map(([s,e])=>fmt(s,e)).join('\\,');
+  // Centred dot between factors — "kN·m" reads unambiguously where "kNm" doesn't.
+  const posStr = pos.map(([s,e])=>fmt(s,e)).join('{\\cdot}');
   if (!neg.length) return '\\,'+posStr;
-  const denStr = neg.map(([s,e])=>fmt(s,e)).join('\\,');
+  const denStr = neg.map(([s,e])=>fmt(s,e)).join('{\\cdot}');
   return '\\,'+(posStr||'1')+'/'+denStr;
 }
 // Fundamental SI decomposition for named unit symbols (dimension only — ignores scale prefixes)
@@ -1202,11 +1222,13 @@ function unitObjEq(a, b) {
 // Serialise a unit-object back to a string, e.g. {N:1,m:-2} → "N/m^2"
 function unitObjToStr(u) {
   if (!u) return '';
-  const pos = Object.entries(u).filter(([,e])=>e>0).sort(([a],[b])=>a.localeCompare(b));
-  const neg = Object.entries(u).filter(([,e])=>e<0).sort(([a],[b])=>a.localeCompare(b));
+  const pos = Object.entries(u).filter(([,e])=>e>0).sort(_unitCmp);
+  const neg = Object.entries(u).filter(([,e])=>e<0).sort(_unitCmp);
   const fmt = ([sym,exp]) => Math.abs(exp)===1 ? sym : sym+'^'+Math.abs(exp);
-  let str = pos.map(fmt).join('*');
-  if (neg.length) str += '/' + neg.map(fmt).join('*');
+  // '·' rather than '*' — this string is shown in the sidebar, exports and
+  // mismatch messages, and parseUnitStr reads '·' straight back in.
+  let str = pos.map(fmt).join('·');
+  if (neg.length) str += '/' + neg.map(fmt).join('·');
   return str;
 }
 // Apply user's preferred display units to a compound SI-base unit object.
