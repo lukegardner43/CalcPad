@@ -234,6 +234,9 @@ body{
 .formula-chip.error{color:var(--rubine);font-style:italic}
 /* Brief highlight on an existing chip when a duplicate definition is attempted */
 .chip-flash{outline:2px solid var(--rubine);outline-offset:1px;border-radius:2px}
+/* A second definition of a name already in use — the first one stays in effect */
+.var-def-chip.dup-name{outline:1px dashed var(--rubine);outline-offset:2px;border-radius:2px;opacity:.75}
+@media print{.var-def-chip.dup-name{outline:none;opacity:1}}
 .flhs{flex-shrink:0}
 .fseg-right{display:flex;flex-wrap:wrap;align-items:baseline;min-width:0}
 .fseg{display:inline-flex;align-items:baseline}
@@ -532,6 +535,44 @@ body{
         style="padding:5px 14px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer;font-size:12px">Cancel</button>
       <button onclick="tblVarModalOk()"
         style="padding:5px 14px;border:none;border-radius:4px;background:var(--rubine);color:#fff;cursor:pointer;font-size:12px;font-weight:700">OK</button>
+    </div>
+  </div>
+</div>
+
+<!-- Choice shown when a pasted chunk redefines variables that already exist -->
+<div id="dupPasteModal" style="display:none;position:fixed;inset:0;z-index:9200;
+  background:rgba(0,0,0,.4);align-items:center;justify-content:center;font-family:Arial,sans-serif">
+  <div style="background:#fff;border-radius:6px;padding:18px 20px;width:390px;max-width:92vw;
+    box-shadow:0 4px 24px rgba(0,0,0,.25)">
+    <div style="font-size:13px;font-weight:700;margin-bottom:8px;color:#1a1a1a">Pasted variables already exist</div>
+    <div style="font-size:11.5px;color:#505050;line-height:1.6;margin-bottom:8px">
+      These names are already defined in this document:
+    </div>
+    <div id="dupPasteList" style="font-size:11.5px;color:var(--rubine);font-weight:700;line-height:1.6;
+      margin-bottom:12px;max-height:88px;overflow-y:auto;word-break:break-word"></div>
+    <div style="font-size:11.5px;color:#505050;line-height:1.6;margin-bottom:16px">
+      A name can only be defined once, so how should the copies be handled?
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button onclick="dupPasteChoose('rename')"
+        style="padding:8px 12px;border:none;border-radius:4px;background:var(--rubine);color:#fff;
+          cursor:pointer;font-size:12px;font-weight:700;text-align:left;font-family:Arial,sans-serif">
+        Rename the copies
+        <div style="font-weight:400;font-size:10.5px;opacity:.9;margin-top:2px">
+          Adds a subscript — <span id="dupPasteEg">x → x_1</span>. Formulas in the pasted block follow the new names.
+        </div>
+      </button>
+      <button onclick="dupPasteChoose('keep')"
+        style="padding:8px 12px;border:1px solid #ddd;border-radius:4px;background:#fff;color:#1a1a1a;
+          cursor:pointer;font-size:12px;font-weight:700;text-align:left;font-family:Arial,sans-serif">
+        Keep the names and flag them
+        <div style="font-weight:400;font-size:10.5px;color:#777;margin-top:2px">
+          Duplicates paste in outlined red for you to rename later. The original definition stays in use.
+        </div>
+      </button>
+      <button onclick="dupPasteChoose(null)"
+        style="padding:5px 14px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer;
+          font-size:12px;align-self:flex-end;margin-top:4px;font-family:Arial,sans-serif">Cancel paste</button>
     </div>
   </div>
 </div>
@@ -2436,6 +2477,11 @@ function rebuildVars() {
   _rebuildActive = true;
   vars = {};
   varUnits = {};
+  // Names already defined earlier in the document. A repeat (usually pasted)
+  // is flagged instead of silently overwriting the first definition, which
+  // used to leave the sidebar and substitutions disagreeing. Recomputed every
+  // pass, so the flag clears itself as soon as the copy is renamed.
+  const seenNames = new Set();
   getAllEditors().forEach(ed => {
     Array.from(ed.querySelectorAll('.var-def-chip, .formula-chip, .calc-table')).forEach(chip => {
       if (chip.classList.contains('calc-table')) { injectNamedCells(chip); return; }
@@ -2445,6 +2491,15 @@ function rebuildVars() {
         const unit = chip.dataset.varUnit || '';
         const siUnit = chip.dataset.varSiUnit || unit;
         if (!name) return;
+        if (seenNames.has(name)) {
+          chip.classList.add('dup-name');
+          if (expr) { try { renderVarChipContent(chip); } catch(e) {} }
+          chip.title = `"${name}" is already defined above — rename this copy. ` +
+                       `The first definition is the one in use.`;
+          return; // must not overwrite the original's value
+        }
+        seenNames.add(name);
+        chip.classList.remove('dup-name');
         if (expr) {
           try {
             const v = parseFloat(evalFormula(expr, vars).replace(/,/g, ''));
@@ -2508,6 +2563,9 @@ formulaBuffer = null;
 document.addEventListener('keydown', e => {
   let ed = getActiveEditor();
   if (!ed) return;
+  // The duplicate-paste prompt owns the keyboard while it is open, otherwise
+  // Enter would commit a chip behind it.
+  if (document.getElementById('dupPasteModal').style.display === 'flex') return;
 
   // Enter/Tab inside a table cell: cells never truly receive focus (the outer
   // .calc-area is the editing host) so the table can't handle its own keys.
@@ -2991,8 +3049,9 @@ document.addEventListener('keydown', e => {
 // Convert one pasted line of text into a fragment, turning "name = expr",
 // "desc name = expr" and bare "= expr" lines into chips exactly as pressing Enter
 // would. wvars/wunits accumulate definitions so later lines can reference earlier
-// ones in the same paste; `taken` tracks names already defined (avoids duplicates).
-function pasteLineToFragment(rawLine, wvars, wunits, taken) {
+// ones in the same paste. Names that clash with existing ones are resolved before
+// we get here (renamed, or left to be flagged by rebuildVars).
+function pasteLineToFragment(rawLine, wvars, wunits) {
   const frag = document.createDocumentFragment();
   const trimmed = rawLine.trim();
   if (!trimmed) return frag; // blank line — the <br> between lines provides the break
@@ -3023,10 +3082,6 @@ function pasteLineToFragment(rawLine, wvars, wunits, taken) {
     const dm = exprStr.match(/^(.*?)\s*\[([^\]]+)\]\s*$/);
     if (dm && dm[1].trim()) { exprStr = dm[1].trim(); dispUnit = dm[2].trim(); }
 
-    // Already defined elsewhere (or earlier in this paste) — leave as plain text
-    // rather than create a conflicting second definition.
-    if (taken.has(varName)) { frag.appendChild(document.createTextNode(rawLine)); return frag; }
-
     let val, unit = '', siUnit = '', ok = false;
     const lit = literalValueUnit(exprStr);
     if (lit) {
@@ -3056,7 +3111,6 @@ function pasteLineToFragment(rawLine, wvars, wunits, taken) {
       if (prefix) frag.appendChild(document.createTextNode(prefix));
       frag.appendChild(makeVarDefChip(varName, val, exprStr, unit, siUnit, dispUnit));
       frag.appendChild(document.createTextNode(' '));
-      taken.add(varName);
       wvars[varName] = val;
       if (siUnit) wunits[varName] = siUnit;
       return frag;
@@ -3077,20 +3131,30 @@ function pasteLineToFragment(rawLine, wvars, wunits, taken) {
   return frag;
 }
 
-// Insert pasted plain text at the caret, converting formula lines into chips.
-function insertPastedText(text) {
+// Variable names a block of pasted text would define.
+function pastedTextNames(text) {
+  const names = [];
+  text.split(/\r\n|\r|\n/).forEach(line => {
+    const t = line.trim();
+    if (!t || /^=(?!=)/.test(t)) return;
+    const m = t.match(VAR_RE) || t.match(VAR_DESC_RE);
+    if (m) names.push(m.length === 4 && m[3] !== undefined ? m[2] : m[1]);
+  });
+  return names;
+}
+
+// Build the chips for a block of text and drop them in at the caret.
+function insertPastedTextNow(text) {
   const sel = window.getSelection();
   if (!sel.rangeCount) return;
   const range = sel.getRangeAt(0);
   range.deleteContents();
-  const lines = text.split(/\r\n|\r|\n/);
   const wvars  = { ...vars };
   const wunits = { ...varUnits };
-  const taken  = new Set(Array.from(document.querySelectorAll('.var-def-chip')).map(c => c.dataset.varName));
   const master = document.createDocumentFragment();
-  lines.forEach((line, i) => {
+  text.split(/\r\n|\r|\n/).forEach((line, i) => {
     if (i > 0) master.appendChild(document.createElement('br'));
-    master.appendChild(pasteLineToFragment(line, wvars, wunits, taken));
+    master.appendChild(pasteLineToFragment(line, wvars, wunits));
   });
   const lastNode = master.lastChild;
   range.insertNode(master);
@@ -3104,11 +3168,256 @@ function insertPastedText(text) {
   isDirty = true; autoSave();
 }
 
+// Insert pasted plain text at the caret, converting formula lines into chips.
+// Asks how to handle names that are already defined, same as a chip paste.
+function insertPastedText(text, range) {
+  const taken = definedVarNames();
+  const names = pastedTextNames(text);
+  const dupes = [...new Set(names.filter(n => taken.has(n)))];
+  if (!dupes.length) { insertPastedTextNow(text); return; }
+  askDuplicatePolicy(dupes, policy => {
+    const finalText = policy === 'rename'
+      ? renamePastedText(text, buildRenameMap(names, taken))
+      : text;
+    withRestoredRange(range, () => insertPastedTextNow(finalText));
+  });
+}
+
+// ── Copy / paste of whole chunks (text + chips) ────────────────
+// Copying a selection that contains chips writes two flavours: text/html keeps
+// the chip elements (data-* attributes and all) so a paste back into CalcPad
+// rebuilds live chips, and text/plain carries readable values so a paste into
+// Word or an email reads sensibly.
+
+function chunkPlainText(root) {
+  let out = '';
+  (function walk(node) {
+    if (node.nodeType === Node.TEXT_NODE) { out += node.textContent; return; }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    if (node.classList.contains('var-def-chip')) { out += varChipExportText(node); return; }
+    if (node.classList.contains('formula-chip')) { out += formulaChipExportText(node); return; }
+    if (node.tagName === 'BR') { out += '\n'; return; }
+    if (node.tagName === 'TD' || node.tagName === 'TH') {
+      for (const c of node.childNodes) walk(c);
+      out += '\t'; return;
+    }
+    const isBlock = /^(P|DIV|H1|H2|H3|LI|TR|BLOCKQUOTE|TABLE)$/.test(node.tagName);
+    for (const c of node.childNodes) walk(c);
+    if (isBlock) out += '\n';
+  })(root);
+  return out.replace(/\t\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+// The selection as a detached <div>, or null when it holds no chips (plain
+// prose is left to the browser's own copy handling).
+function selectionChunk() {
+  const sel = window.getSelection();
+  if (!sel.rangeCount || sel.isCollapsed) return null;
+  const range = sel.getRangeAt(0);
+  let n = range.commonAncestorContainer;
+  if (n.nodeType !== Node.ELEMENT_NODE) n = n.parentElement;
+  if (!n || !n.closest || !n.closest('.calc-area')) return null;
+  const div = document.createElement('div');
+  div.appendChild(range.cloneContents());
+  return div.querySelector('.var-def-chip, .formula-chip') ? div : null;
+}
+
+function writeChunkToClipboard(e, div) {
+  e.clipboardData.setData('text/html', div.innerHTML);
+  e.clipboardData.setData('text/plain', chunkPlainText(div));
+  e.preventDefault();
+}
+
+document.addEventListener('copy', e => {
+  const div = selectionChunk();
+  if (div) writeChunkToClipboard(e, div);
+});
+
+document.addEventListener('cut', e => {
+  const div = selectionChunk();
+  if (!div) return;
+  writeChunkToClipboard(e, div);
+  const sel = window.getSelection();
+  if (sel.rangeCount) sel.getRangeAt(0).deleteContents();
+  _editCommitPending = true; setTimeout(() => { _editCommitPending = false; }, 500);
+  rebuildVars();
+  isDirty = true; autoSave();
+});
+
+// Parse copied HTML into a fragment, dropping anything unsafe or transient.
+// Runtime markers must not survive: a pasted table carrying data-tbl-handlers
+// would look already-wired and never get its listeners.
+function sanitisePastedChunk(html) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  const frag = tpl.content;
+  frag.querySelectorAll('script,style,link,meta,title,iframe,object,embed,form,input,button').forEach(n => n.remove());
+  frag.querySelectorAll('*').forEach(el => {
+    Array.from(el.attributes).forEach(a => {
+      if (/^on/i.test(a.name) || /^(src|href)$/i.test(a.name) && /^\s*javascript:/i.test(a.value))
+        el.removeAttribute(a.name);
+    });
+    el.removeAttribute('data-reflow-split');
+    el.removeAttribute('data-tbl-handlers');
+    if (el.classList.contains('var-def-chip') || el.classList.contains('formula-chip')) {
+      el.classList.remove('chip-flash', 'dup-name');
+      el.contentEditable = 'false';
+    }
+  });
+  return frag;
+}
+
+const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// name → name_1 (then _2, …) for every pasted name that already exists.
+function buildRenameMap(names, taken) {
+  const used = new Set([...taken, ...names]);
+  const map = {};
+  names.forEach(n => {
+    if (!taken.has(n) || map[n]) return;
+    let i = 1, cand;
+    do { cand = n + '_' + i; i++; } while (used.has(cand));
+    map[n] = cand; used.add(cand);
+  });
+  return map;
+}
+
+function renameRegex(map) {
+  const keys = Object.keys(map).sort((a, b) => b.length - a.length);
+  return keys.length ? new RegExp('\\b(' + keys.map(escapeRe).join('|') + ')\\b', 'g') : null;
+}
+
+function applyRenameToChunk(frag, map) {
+  const re = renameRegex(map);
+  if (!re) return;
+  const sub = s => s.replace(re, m => map[m] || m);
+  frag.querySelectorAll('.var-def-chip').forEach(c => {
+    if (map[c.dataset.varName]) c.dataset.varName = map[c.dataset.varName];
+    if (c.dataset.varExpr) c.dataset.varExpr = sub(c.dataset.varExpr);
+  });
+  frag.querySelectorAll('.formula-chip').forEach(c => {
+    if (c.dataset.formula) c.dataset.formula = sub(c.dataset.formula);
+  });
+  frag.querySelectorAll('[data-varname]').forEach(c => {
+    if (map[c.dataset.varname]) c.dataset.varname = map[c.dataset.varname];
+  });
+}
+
+// Rewrite names in pasted plain text. Only the variable name and expression
+// parts are touched — prose lines are left exactly as written.
+function renamePastedText(text, map) {
+  const re = renameRegex(map);
+  if (!re) return text;
+  const sub = s => s.replace(re, m => map[m] || m);
+  return text.split(/\r\n|\r|\n/).map(line => {
+    const t = line.trim();
+    if (!t) return line;
+    if (/^=(?!=)/.test(t)) return line.replace(t, sub(t));
+    const m = t.match(VAR_RE) || t.match(VAR_DESC_RE);
+    if (!m) return line;
+    const isDesc = m.length === 4 && m[3] !== undefined;
+    const name = isDesc ? m[2] : m[1];
+    const expr = isDesc ? m[3] : m[2];
+    const prefix = isDesc ? m[1] : '';
+    return line.replace(t, prefix + (map[name] || name) + ' = ' + sub(expr));
+  }).join('\n');
+}
+
+function insertChunkFragment(frag) {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return;
+  const range = sel.getRangeAt(0);
+  range.deleteContents();
+  // Collect before insertion — insertNode empties the fragment.
+  const chips = Array.from(frag.querySelectorAll('.var-def-chip'));
+  const hasTable = !!frag.querySelector('.calc-table');
+  const last = frag.lastChild;
+  range.insertNode(frag);
+  if (last) {
+    const r = document.createRange();
+    r.setStartAfter(last); r.collapse(true);
+    sel.removeAllRanges(); sel.addRange(r);
+  }
+  // Re-render so renamed chips show their new name (saved HTML carries the old
+  // KaTeX markup, and rebuildVars only re-renders chips that have an expression).
+  chips.forEach(c => { try { renderVarChipContent(c); } catch(e) {} });
+  reattachImageHandlers();
+  _editCommitPending = true; setTimeout(() => { _editCommitPending = false; }, 500);
+  if (hasTable) refreshAllTables(); else rebuildVars();
+  isDirty = true; autoSave();
+}
+
+// ── Duplicate-name prompt ─────────────────────────────────────
+let _pendingPaste = null; // { apply(policy), dupes }
+
+function askDuplicatePolicy(dupes, apply) {
+  _pendingPaste = { apply, dupes };
+  document.getElementById('dupPasteList').textContent = dupes.join(', ');
+  document.getElementById('dupPasteEg').textContent = dupes[0] + ' → ' + dupes[0] + '_1';
+  document.getElementById('dupPasteModal').style.display = 'flex';
+  setTimeout(() => { const b = document.querySelector('#dupPasteModal button'); if (b) b.focus(); }, 30);
+}
+
+function dupPasteChoose(policy) {
+  document.getElementById('dupPasteModal').style.display = 'none';
+  const pending = _pendingPaste;
+  _pendingPaste = null;
+  // Hand the caret back to the page, or focus stays on the hidden button and
+  // the next Ctrl+V never reaches the editor. apply() refocuses on its own.
+  if (!pending || !policy) { const ed = getActiveEditor(); if (ed) ed.focus(); return; }
+  pending.apply(policy);
+}
+
+document.addEventListener('keydown', e => {
+  if (document.getElementById('dupPasteModal').style.display !== 'flex') return;
+  if (e.key === 'Escape') { e.preventDefault(); dupPasteChoose(null); }
+  if (e.key === 'Enter')  { e.preventDefault(); dupPasteChoose('rename'); }
+}, true);
+
+// Names already defined anywhere in the document.
+function definedVarNames() {
+  return new Set(Array.from(document.querySelectorAll('.var-def-chip'))
+    .map(c => c.dataset.varName).filter(Boolean));
+}
+
+// Restore the caret to where the paste happened — the modal takes focus away.
+function withRestoredRange(range, fn) {
+  const ed = getActiveEditor();
+  if (ed) ed.focus();
+  const sel = window.getSelection();
+  sel.removeAllRanges(); sel.addRange(range);
+  fn();
+}
+
+function pasteChunkHtml(html, range) {
+  const frag = sanitisePastedChunk(html);
+  const names = Array.from(frag.querySelectorAll('.var-def-chip'))
+    .map(c => c.dataset.varName).filter(Boolean);
+  const taken = definedVarNames();
+  const dupes = [...new Set(names.filter(n => taken.has(n)))];
+  if (!dupes.length) { withRestoredRange(range, () => insertChunkFragment(frag)); return; }
+  askDuplicatePolicy(dupes, policy => {
+    if (policy === 'rename') applyRenameToChunk(frag, buildRenameMap(names, taken));
+    withRestoredRange(range, () => insertChunkFragment(frag));
+  });
+}
+
 document.addEventListener('paste', e => {
   const ca = e.target.closest('.calc-area');
   if (!ca) return;
   const cd = e.clipboardData;
   if (!cd) return;
+  // A chunk copied from CalcPad: rebuild the chips rather than flattening to text.
+  const html = cd.getData ? cd.getData('text/html') : '';
+  if (html && /\b(var-def-chip|formula-chip|calc-table)\b/.test(html) &&
+      formulaBuffer === null && !caretTableCell()) {
+    e.preventDefault();
+    setActiveEditor(ca);
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    pasteChunkHtml(html, sel.getRangeAt(0).cloneRange());
+    return;
+  }
   // Plain text (also strips messy rich-text HTML from Word etc.): convert formulas
   const text = cd.getData ? cd.getData('text/plain') : '';
   if (text) {
@@ -3117,7 +3426,9 @@ document.addEventListener('paste', e => {
     // Mid-formula edit, or pasting into a table cell: insert as plain text —
     // table formulas commit when the caret leaves the cell, not via chips.
     if (formulaBuffer !== null || caretTableCell()) { document.execCommand('insertText', false, text); return; }
-    insertPastedText(text);
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    insertPastedText(text, sel.getRangeAt(0).cloneRange());
     return;
   }
   // No text — handle an image on the clipboard
@@ -3751,6 +4062,18 @@ function varChipDisplayParts(chip) {
   return { val: fmtNum(val), unit: '' };
 }
 
+// Plain-text form of a formula chip: "=w*B*L/2 = 4536 N" in display units.
+function formulaChipExportText(chip) {
+  const f = chip.dataset.formula;
+  if (!f) return chip.textContent.trim();
+  let res, isErr = false;
+  try { res = evalFormula(f, vars); } catch(e) { res = e.message || 'Error'; isErr = true; }
+  if (isErr) return '=' + f + ' — ' + res;
+  const p = formulaDisplayParts(f, res, chip.dataset.formulaUnit || '');
+  return p.mismatch ? '=' + f + ' — unit mismatch [' + p.mismatch + ']'
+                    : '=' + f + ' = ' + p.val + (p.unit ? ' ' + p.unit : '');
+}
+
 // Plain-text form of a variable chip for Word export: "name = expr = 33.68 kN"
 // or "w = 0.6 kN/m^2" — display units, matching the on-screen chip.
 function varChipExportText(chip) {
@@ -3777,17 +4100,8 @@ async function exportWord() {
       let tag=node.tagName.toLowerCase(),nf={...fmt};
       if(tag==='b'||tag==='strong')nf.bold=true;if(tag==='i'||tag==='em')nf.italics=true;
       if(tag==='u')nf.underline={};if(tag==='s'||tag==='strike')nf.strike=true;
-      if(node.classList&&node.classList.contains('formula-chip')){
-        // Export display values (converted units), not raw KaTeX text / SI internals.
-        const f=node.dataset.formula;let t='';
-        if(f){
-          let res,isErr=false;
-          try{res=evalFormula(f,vars);}catch(e){res=e.message||'Error';isErr=true;}
-          if(isErr){t='='+f+' — '+res;}
-          else{const p=formulaDisplayParts(f,res,node.dataset.formulaUnit||'');
-            t=p.mismatch?('='+f+' — unit mismatch ['+p.mismatch+']'):('='+f+' = '+p.val+(p.unit?' '+p.unit:''));}
-        }else t=node.textContent.trim();
-        if(t)runs.push(new TextRun({text:t,italics:true,...fmt}));return;}
+      // Export display values (converted units), not raw KaTeX text / SI internals.
+      if(node.classList&&node.classList.contains('formula-chip')){const t=formulaChipExportText(node);if(t)runs.push(new TextRun({text:t,italics:true,...fmt}));return;}
       if(node.classList&&node.classList.contains('var-def-chip')){const t=varChipExportText(node);if(t)runs.push(new TextRun({text:t,italics:true,...fmt}));return;}
       for(const c of node.childNodes)walk(c,nf);
     } walk(el,{}); return runs;
