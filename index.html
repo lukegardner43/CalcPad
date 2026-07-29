@@ -230,7 +230,10 @@ body{
 .vdc-edit-input{border:none;border-bottom:1px solid var(--rubine);outline:none;background:transparent;
   font-family:Arial,sans-serif;font-size:11px;font-style:italic;color:var(--dark);width:60px;padding:0 2px}
 .formula-chip{display:inline-flex;align-items:baseline;max-width:100%;cursor:default;user-select:none;vertical-align:middle}
-.formula-chip .katex{font-size:1em}
+/* Both chip types must render maths at the surrounding text size — KaTeX's own
+   default is 1.21em, which made variable chips jump in size next to formula
+   chips and whenever one became the other. */
+.formula-chip .katex,.var-def-chip .katex{font-size:1em}
 .formula-chip.error{color:var(--rubine);font-style:italic}
 /* Brief highlight on an existing chip when a duplicate definition is attempted */
 .chip-flash{outline:2px solid var(--rubine);outline-offset:1px;border-radius:2px}
@@ -1668,6 +1671,17 @@ function makeFormulaChip(formula, result, isError, outputUnit) {
   return chip;
 }
 
+// An error chip for a variable definition that wouldn't evaluate. Carrying the
+// name (varPending) keeps "name = expr" together, so the user can click it, fix
+// the expression, and get their variable back — rather than the name being left
+// as loose text and the definition lost.
+function makeVarErrorChip(varName, expr, result, isError, dispUnit) {
+  const chip = makeFormulaChip(expr, result, isError, dispUnit);
+  chip.dataset.varPending = varName;
+  setFormulaContent(chip, expr, result, isError); // re-render now the name is set
+  return chip;
+}
+
 function startEditFormulaChip(chip) {
   formulaBuffer = null;
   const formula = chip.dataset.formula;
@@ -1676,7 +1690,11 @@ function startEditFormulaChip(chip) {
   const next = chip.nextSibling;
   if (next && next.nodeType === Node.TEXT_NODE && next.textContent === ' ') next.remove();
   const outputUnit = chip.dataset.formulaUnit || '';
-  const textNode = document.createTextNode('=' + formula + (outputUnit ? ' [' + outputUnit + ']' : ''));
+  // A failed variable definition edits as the whole "name = expr" again, so
+  // correcting it recreates the variable instead of leaving the name behind.
+  const pending = chip.dataset.varPending || '';
+  const textNode = document.createTextNode(
+    (pending ? pending + ' = ' : '=') + formula + (outputUnit ? ' [' + outputUnit + ']' : ''));
   chip.parentNode.replaceChild(textNode, chip);
   const range = document.createRange();
   range.setStart(textNode, textNode.length);
@@ -1698,8 +1716,13 @@ function startEditVarDefChip(chip) {
   const next = chip.nextSibling;
   if (next && next.nodeType === Node.TEXT_NODE && next.textContent === ' ') next.remove();
   const displayUnit = chip.dataset.varDisplayUnit || '';
-  const editText = name + ' = ' + expr +
-    (displayUnit ? ' [' + displayUnit + ']' : (unit ? ' ' + unit : ''));
+  // Only put back what the user actually typed. A [kN] display spec is theirs, and
+  // so is the unit on a literal like "0.6 kN/m2" — but the unit on an expression
+  // chip is inferred, and appending it produced un-evaluable text ("V = w*B N/m").
+  // Documents saved before that fix still carry one, hence the varExpr check.
+  const unitSuffix = displayUnit ? ' [' + displayUnit + ']'
+                   : (unit && !chip.dataset.varExpr ? ' ' + unit : '');
+  const editText = name + ' = ' + expr + unitSuffix;
   const textNode = document.createTextNode(editText);
   chip.parentNode.replaceChild(textNode, chip);
   const range = document.createRange();
@@ -1749,7 +1772,16 @@ function formulaDisplayParts(formula, result, outputUnit) {
 
 function setFormulaContent(chip, formula, result, isError) {
   if (isError) {
-    chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">=${formula} — ${result}</span>`;
+    // varPending: this chip is a variable definition that failed to evaluate, so
+    // it keeps showing "name = expr" and edits round-trip back to a definition.
+    const pending = chip.dataset.varPending || '';
+    const span = document.createElement('span');
+    span.style.cssText = 'font-style:italic;color:var(--rubine)';
+    // textContent, not innerHTML — a formula may legitimately contain < or >
+    // (comparisons), which would otherwise be parsed as markup.
+    span.textContent = (pending ? pending + ' = ' : '=') + formula + ' — ' + result;
+    chip.textContent = '';
+    chip.appendChild(span);
     chip.title = `Error: ${result}`;
     return;
   }
@@ -2690,10 +2722,12 @@ document.addEventListener('keydown', e => {
       try {
         val = parseFloat(evalFormula(exprStr, vars).replace(/,/g, ''));
         if (isNaN(val)) throw new Error('NaN');
-        if (!unit) {
-          const inferred = evalUnitExpr(exprStr, varUnits);
-          if (inferred && Object.keys(inferred).length) { siUnit = unit = unitObjToStr(inferred); }
-        }
+        // Deliberately no unit here. An expression's unit is re-derived from its
+        // operands on every render (rebuildVars/renderVarChipContent), so storing
+        // a snapshot of it on the chip only caused trouble: it was appended to the
+        // text when editing ("V = w*B N/m", which then fails to evaluate) and it
+        // bypassed the user's unit preferences in the sidebar. commitFormula has
+        // always left it unset; this path now matches.
       } catch(err) {
         const ue = extractValueAndUnit(exprStr);
         if (!ue) {
@@ -2706,11 +2740,10 @@ document.addEventListener('keydown', e => {
           let result, isError = false;
           try { result = evalFormula(exprStr, vars); }
           catch(ex) { result = ex.message || 'Error'; isError = true; }
-          const before = fullText.slice(0, fullText.indexOf('='));
           const parent = node.parentNode;
           const frag = document.createDocumentFragment();
-          if (before) frag.appendChild(document.createTextNode(before));
-          frag.appendChild(makeFormulaChip(exprStr, result, isError, dispUnit));
+          if (prefix) frag.appendChild(document.createTextNode(prefix));
+          frag.appendChild(makeVarErrorChip(varName, exprStr, result, isError, dispUnit));
           const spacer = document.createTextNode(' ');
           frag.appendChild(spacer);
           parent.replaceChild(frag, node);
@@ -2842,9 +2875,13 @@ function commitFormula(ed) {
   // outputUnit (from [mm] spec) becomes the display unit on the chip.
   const before = text.slice(0, eqIdx);
   const varEndMatch = before.trimEnd().match(/^([\s\S]*\s)?([a-zA-Z][a-zA-Z0-9_]*)$/);
+  // Kept in scope for the error fallback below, so a definition that fails to
+  // evaluate still commits as a named error chip rather than stranding its name.
+  let defName = '', defPrefix = '';
   if (varEndMatch) {
     const varName = varEndMatch[2];
     const prefix  = varEndMatch[1] || '';
+    defName = varName; defPrefix = prefix;
     // Same duplicate guard as the keydown path: don't create a second chip for an
     // existing name — flash the original definition and leave the text as typed.
     const existingChip = document.querySelector(`.var-def-chip[data-var-name="${CSS.escape(varName)}"]`);
@@ -2898,8 +2935,15 @@ function commitFormula(ed) {
   catch(ex) { result = ex.message || 'Error'; isError = true; }
   const parent = node.parentNode;
   const frag = document.createDocumentFragment();
-  if (before) frag.appendChild(document.createTextNode(before));
-  frag.appendChild(makeFormulaChip(formula, result, isError, outputUnit));
+  if (defName) {
+    // "name = expr" that wouldn't evaluate: keep the name on the chip so editing
+    // it offers the whole definition back and a fix restores the variable.
+    if (defPrefix) frag.appendChild(document.createTextNode(defPrefix));
+    frag.appendChild(makeVarErrorChip(defName, formula, result, isError, outputUnit));
+  } else {
+    if (before) frag.appendChild(document.createTextNode(before));
+    frag.appendChild(makeFormulaChip(formula, result, isError, outputUnit));
+  }
   const spacer = document.createTextNode('\u00A0');
   frag.appendChild(spacer);
   parent.replaceChild(frag, node);
@@ -3115,13 +3159,13 @@ function pasteLineToFragment(rawLine, wvars, wunits) {
       if (siUnit) wunits[varName] = siUnit;
       return frag;
     }
-    // Couldn't evaluate — commit an error formula chip so the failure is visible
-    // (consistent with the Enter-key handler), keeping "name =" as leading text.
+    // Couldn't evaluate — commit an error chip so the failure is visible
+    // (consistent with the Enter-key handler); it keeps the variable name so a
+    // corrected edit turns it back into a definition.
     let result, isError = false;
     try { result = evalFormula(exprStr, wvars); } catch(ex) { result = ex.message || 'Error'; isError = true; }
-    const before = trimmed.slice(0, trimmed.indexOf('='));
-    if (before) frag.appendChild(document.createTextNode(before));
-    frag.appendChild(makeFormulaChip(exprStr, result, isError, dispUnit));
+    if (prefix) frag.appendChild(document.createTextNode(prefix));
+    frag.appendChild(makeVarErrorChip(varName, exprStr, result, isError, dispUnit));
     frag.appendChild(document.createTextNode(' '));
     return frag;
   }
