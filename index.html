@@ -650,6 +650,8 @@ body{
         <div class="sref-i"><span>=SINH/COSH/TANH(x)</span></div>
         <div class="sref-i"><span>=DEG(x) / RAD(x)</span></div>
         <div class="sref-i"><span>angles in rad — use 30deg</span></div>
+        <div class="sref-i"><span>x = solver(a == b)</span></div>
+        <div class="sref-i"><span>solves for x where a = b</span></div>
       </div>
     </div>
 
@@ -804,6 +806,10 @@ const FUNS = {
   TANH:    x => Math.tanh(x),
   DEG:     x => x * 180 / Math.PI,
   RAD:     x => x * Math.PI / 180,
+  // Handled before evaluation (see solveForVariable). Reaching it here means it
+  // was nested inside a larger expression, which can't work — it has to be the
+  // whole definition so we know which variable to solve for.
+  SOLVER:  () => { throw new Error('solver() must be the whole definition, e.g. x = solver(a == b)'); },
 };
 
 // Functions whose result is always dimensionless, so a surrounding unit
@@ -912,10 +918,11 @@ function transformPowers(expr) {
   }
 }
 
-function evalFormula(raw, variables) {
-  // Built-in constants are available unless the user has defined a variable with the same name
-  const variables_ = { ...MATH_CONSTS, ...variables };
-  let expr = raw.trim();
+// Turn a CalcPad expression into evaluable JavaScript. Names in `free` are left
+// as bare identifiers instead of being substituted, so the solver can bind one
+// as a function parameter and vary it.
+function toJsExpr(raw, variables_, free) {
+  let expr = String(raw).trim();
   // Normalise function names to uppercase so sqrt(), Sqrt(), SQRT() all work.
   // Only uppercases identifiers immediately followed by '(' that aren't variable names.
   const varNames = new Set(Object.keys(variables_));
@@ -939,14 +946,24 @@ function evalFormula(raw, variables) {
     });
   }
   const vnames = Object.keys(variables_).sort((a,b) => b.length - a.length);
-  for (const vn of vnames)
+  for (const vn of vnames) {
+    if (free && free.has(vn)) continue;
     expr = expr.replace(new RegExp(`\\b${vn}\\b`, 'g'), `(${variables_[vn]})`);
+  }
   // [A-Z_][A-Z0-9_]* — the trailing digits matter: a bare [A-Z_]+ never matched
   // ATAN2( , so it survived as a bare identifier and threw "ATAN2 is not defined".
-  let safe = expr.replace(/\b([A-Z_][A-Z0-9_]*)\s*\(/g, (_,nm) => {
+  return expr.replace(/\b([A-Z_][A-Z0-9_]*)\s*\(/g, (_,nm) => {
     if (FUNS[nm]) return `__F.${nm}(`;
     throw new Error(`Unknown: ${nm}`);
   });
+}
+
+// solveFor names the variable being defined; it is only needed for solver().
+function evalFormula(raw, variables, solveFor) {
+  if (isSolverExpr(raw)) return fmtNum(solveForVariable(raw, solveFor, variables));
+  // Built-in constants are available unless the user has defined a variable with the same name
+  const variables_ = { ...MATH_CONSTS, ...variables };
+  const safe = toJsExpr(raw, variables_);
   let result = new Function('__F', `"use strict"; return (${safe});`)(FUNS);
   if (typeof result === 'boolean') return result ? 'TRUE' : 'FALSE';
   if (typeof result === 'number') {
@@ -954,6 +971,202 @@ function evalFormula(raw, variables) {
     return fmtNum(result);
   }
   return String(result);
+}
+
+// ── Equation solver ────────────────────────────────────────
+// "x = solver(lhs == rhs)" finds the x that makes both sides equal. Either side
+// may use x directly, or through other variables — those are substituted in
+// first, so "d = solver(M_Rd == M_Ed)" works when M_Rd is itself a formula in d
+// (and M_Rd may be built from further formulas in turn).
+const SOLVER_RE = /^\s*solver\s*\(([\s\S]+)\)\s*$/i;
+function isSolverExpr(s) { return SOLVER_RE.test(String(s == null ? '' : s)); }
+
+// Split "a == b" at the top-level equals. Accepts '=' as well as '==', but not
+// the comparison operators, which are meaningful inside either side.
+function splitEquation(s) {
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '(') depth++;
+    else if (c === ')') depth--;
+    else if (c === '=' && depth === 0) {
+      const prev = s[i-1], next = s[i+1];
+      if (prev === '<' || prev === '>' || prev === '!' || prev === '=') continue;
+      if (next === '=') return [s.slice(0, i), s.slice(i + 2)];
+      return [s.slice(0, i), s.slice(i + 1)];
+    }
+  }
+  return null;
+}
+
+// Every variable formula in the document, including definitions that are
+// currently erroring (they hold their expression on the chip as well), so an
+// equation can reference a variable that cannot be evaluated until x is known.
+function varExprMap() {
+  const m = {};
+  document.querySelectorAll('.var-def-chip[data-var-expr]').forEach(c => {
+    const n = c.dataset.varName;
+    if (n && !c.classList.contains('dup-name') && m[n] === undefined) m[n] = c.dataset.varExpr;
+  });
+  document.querySelectorAll('.formula-chip[data-var-pending]').forEach(c => {
+    const n = c.dataset.varPending;
+    if (n && c.dataset.formula && m[n] === undefined) m[n] = c.dataset.formula;
+  });
+  return m;
+}
+
+// Current value of every variable chip in the document. The solver reads the
+// whole page rather than only what has been evaluated so far, so an equation can
+// refer to a value that is defined further down.
+function chipValues() {
+  const v = {};
+  document.querySelectorAll('.var-def-chip').forEach(c => {
+    const n = c.dataset.varName;
+    if (!n || c.classList.contains('dup-name') || v[n] !== undefined) return;
+    const num = parseFloat(c.dataset.varVal);
+    if (!isNaN(num)) v[n] = num;
+  });
+  return v;
+}
+
+// Substitute variable formulas into `expr` until only `target` and plain-valued
+// variables are left, turning the equation into a function of `target` alone.
+function expandExpr(expr, target, exprMap, depth) {
+  if (depth > 25) return expr; // cyclic definitions — stop unrolling
+  let changed = false;
+  const out = String(expr).replace(/\b([a-zA-Z_][a-zA-Z0-9_]*)\b(\s*\()?/g, (m, name, call) => {
+    if (call) return m;                 // a function call, not a variable
+    if (name === target) return name;   // the unknown stays free
+    const sub = exprMap[name];
+    if (sub === undefined || isSolverExpr(sub)) return m;
+    changed = true;
+    return '(' + sub + ')';
+  });
+  return changed ? expandExpr(out, target, exprMap, depth + 1) : out;
+}
+
+// Bracket a sign change, then bisect. Falls back to the secant method when the
+// residual never changes sign over the sampled range.
+function findRoot(f, guess) {
+  const scale = (isFinite(guess) && guess !== 0) ? Math.abs(guess) : 1;
+  const mags = [1e-4, 1e-3, 1e-2, 0.1, 0.25, 0.5, 1, 2, 4, 10, 25, 100, 1e3, 1e4, 1e6];
+  // Walk outwards from zero, positives first: where an equation has roots of
+  // both signs (x^2 == 16) the positive one is nearly always the wanted answer.
+  const ladders = [[0].concat(mags.map(mg => mg * scale)),
+                   [0].concat(mags.map(mg => -mg * scale))];
+
+  let lo = null, hi = null, flo = 0, trivial = null;
+  for (const xs of ladders) {
+    let prevX = null, prevF = null;
+    for (const x of xs) {
+      let fx;
+      try { fx = f(x); } catch (e) { prevX = null; prevF = null; continue; }
+      if (!isFinite(fx)) { prevX = null; prevF = null; continue; }
+      if (fx === 0) {
+        // x = 0 satisfies plenty of equations trivially (sqrt(x) == x/3). Keep
+        // it as a fallback and carry on looking for a more useful root.
+        if (x === 0) { trivial = 0; prevX = null; prevF = null; continue; }
+        return x;
+      }
+      if (prevF !== null && Math.sign(fx) !== Math.sign(prevF)) { lo = Math.min(prevX, x); hi = Math.max(prevX, x); flo = (lo === prevX) ? prevF : fx; break; }
+      prevX = x; prevF = fx;
+    }
+    if (lo !== null) break;
+  }
+
+  if (lo !== null) {
+    for (let i = 0; i < 200 && Math.abs(hi - lo) > 1e-15 * Math.max(1, Math.abs(lo)); i++) {
+      const mid = (lo + hi) / 2;
+      let fm;
+      try { fm = f(mid); } catch (e) { break; }
+      if (!isFinite(fm)) break;
+      if (fm === 0) return mid;
+      if (Math.sign(fm) === Math.sign(flo)) { lo = mid; flo = fm; } else { hi = mid; }
+    }
+    return (lo + hi) / 2;
+  }
+
+  // No sign change found — secant from a few starting points
+  for (const start of [scale, -scale, scale * 10, 0]) {
+    let a = start, bb = start + (scale * 0.1 || 0.1);
+    let fa, fb;
+    try { fa = f(a); fb = f(bb); } catch (e) { continue; }
+    for (let i = 0; i < 100 && isFinite(fa) && isFinite(fb); i++) {
+      if (fb === fa) break;
+      const c = bb - fb * (bb - a) / (fb - a);
+      if (!isFinite(c)) break;
+      a = bb; fa = fb; bb = c;
+      try { fb = f(bb); } catch (e) { break; }
+      if (Math.abs(bb - a) <= 1e-14 * Math.max(1, Math.abs(bb))) break;
+    }
+    if (isFinite(bb) && isFinite(fb) && Math.abs(fb) < 1e-9 * Math.max(1, Math.abs(bb))) return bb;
+  }
+  return trivial; // null unless zero turned out to be a root after all
+}
+
+function solveForVariable(raw, target, variables) {
+  const m = String(raw).match(SOLVER_RE);
+  if (!m) throw new Error('Not a solver expression');
+  if (!target) throw new Error('solver() must define a variable, e.g. x = solver(a == b)');
+  const sides = splitEquation(m[1]);
+  if (!sides) throw new Error('solver() needs an equation, e.g. solver(a == b)');
+
+  const exprMap = varExprMap();
+  delete exprMap[target];                       // never unroll the unknown itself
+  const lhs = expandExpr(sides[0], target, exprMap, 0);
+  const rhs = expandExpr(sides[1], target, exprMap, 0);
+  if (!lhs.trim() || !rhs.trim()) throw new Error('solver() needs an expression on both sides');
+
+  // Live values win over the chip snapshot, which only fills in variables that
+  // sit further down the page and so have not been evaluated in this pass yet.
+  const variables_ = { ...MATH_CONSTS, ...chipValues(), ...variables };
+  delete variables_[target];
+
+  // Anything left after expansion that isn't a known variable, function or unit
+  // can't be resolved — report it before anything else, since a term that is
+  // simply missing would otherwise look like the equation ignoring the unknown.
+  const unknown = [];
+  (lhs + ' ' + rhs).replace(/\b([a-zA-Z_][a-zA-Z0-9_]*)\b(\s*\()?/g, (m, name, call) => {
+    if (call || name === target) return m;
+    if (Object.prototype.hasOwnProperty.call(variables_, name)) return m;
+    if (Object.prototype.hasOwnProperty.call(UNIT_CONVERSIONS, name)) return m;
+    if (!unknown.includes(name)) unknown.push(name);
+    return m;
+  });
+  if (unknown.length)
+    throw new Error(`${unknown.join(', ')} ${unknown.length > 1 ? 'are' : 'is'} not defined yet`);
+
+  // Requirement: the equation must actually involve the unknown.
+  if (!new RegExp('\\b' + target + '\\b').test(lhs + ' ' + rhs))
+    throw new Error(`${target} is not used in the equation`);
+
+  const free = new Set([target]);
+  let fn;
+  try {
+    const body = `"use strict"; return (${toJsExpr(lhs, variables_, free)}) - (${toJsExpr(rhs, variables_, free)});`;
+    fn = new Function('__F', target, body);
+  } catch (e) { throw new Error('Could not read the equation'); }
+
+  // A trial evaluation surfaces undefined variables as a clear error.
+  const residual = t => {
+    const v = fn(FUNS, t);
+    if (typeof v !== 'number') throw new Error('Equation must compare numbers');
+    return v;
+  };
+  try { residual(1); }
+  catch (e) {
+    const undef = /(\w+) is not defined/.exec(e.message);
+    throw new Error(undef ? `${undef[1]} is not defined yet` : e.message);
+  }
+
+  const guess = parseFloat(variables[target]);
+  const root = findRoot(residual, isNaN(guess) ? 1 : guess);
+  if (root === null || !isFinite(root)) throw new Error(`No solution found for ${target}`);
+  // Confirm it really is a root — the secant path can stall on a flat section.
+  const check = Math.abs(residual(root));
+  const magnitude = Math.max(1, Math.abs(residual(root + 1)) + Math.abs(root));
+  if (!isFinite(check) || check > 1e-6 * magnitude) throw new Error(`No solution found for ${target}`);
+  return root;
 }
 
 function fmtNum(n) {
@@ -2199,6 +2412,8 @@ function initPage1Height() {
 
 const reflowDebounce = new Map();
 let _rebuildActive = false; // suppresses MutationObserver-triggered reflow during rebuildVars
+let _rebuildPromoted = false; // a failed definition started working during this pass
+let _rebuildDepth = 0;        // bounds the re-run those promotions trigger
 
 function attachOverflowMonitor(edEl, contEl) {
   // Only suppress mutation-driven reflow during programmatic chip updates, not user typing
@@ -2615,7 +2830,7 @@ function rebuildVars() {
         chip.classList.remove('dup-name');
         if (expr) {
           try {
-            const v = parseFloat(evalFormula(expr, vars).replace(/,/g, ''));
+            const v = parseFloat(evalFormula(expr, vars, name).replace(/,/g, ''));
             if (!isNaN(v)) {
               // Convert formula result to SI so downstream chips get the right value.
               // varUnit = trailing unit ("4.6/100 kN/m" style); varDisplayUnit = [kN/m] specifier.
@@ -2626,13 +2841,18 @@ function rebuildVars() {
                 if (conv) siV = conv.siVal;
               } else if (dispUnit) {
                 const inf = evalUnitExpr(expr, varUnits);
-                if (inf && Object.keys(inf).length) {
+                // A solved value is already in SI base units like any other
+                // computed result, so [unit] converts for display here too.
+                if (isSolverExpr(expr) || (inf && Object.keys(inf).length)) {
                   // The expression already has a dimension, so evalFormula has
                   // returned SI and [unit] is display-only. Converting here
                   // double-converted it: "d = hh - bb [mm]" stored 0.0002 m
                   // instead of 0.2 m and showed 0.2 mm instead of 200 mm — and
                   // the corrupted value fed straight into anything using d.
-                  varUnits[name] = simplifyUnitStr(inf) || unitObjToStr(inf);
+                  if (inf && Object.keys(inf).length) varUnits[name] = simplifyUnitStr(inf) || unitObjToStr(inf);
+                  // Solver case: take the dimension from [unit], stored in SI
+                  // base terms like every other entry in varUnits.
+                  else varUnits[name] = unitObjToStr(unitObjToSIBase(parseUnitStr(dispUnit)));
                 } else {
                   // Dimensionless arithmetic: [unit] declares what the number is
                   // in, e.g. "w = 4.6/100 [kN/m]" → 46 N/m.
@@ -2662,9 +2882,26 @@ function rebuildVars() {
       } else {
         const formula = chip.dataset.formula;
         if (!formula) return;
+        // A definition that failed earlier (varPending) gets another go: the
+        // variables it needed may exist by now. This is what lets an equation be
+        // written before the formulas it refers to — the solver definition and
+        // its terms can be entered in either order.
+        const pending = chip.dataset.varPending || '';
+        if (pending && !seenNames.has(pending)) {
+          let pv = NaN;
+          try { pv = parseFloat(evalFormula(formula, vars, pending).replace(/,/g, '')); } catch(e) {}
+          if (!isNaN(pv)) {
+            const promoted = makeVarDefChip(pending, pv, formula, '', '', chip.dataset.formulaUnit || '');
+            chip.replaceWith(promoted);
+            seenNames.add(pending);
+            vars[pending] = pv;
+            _rebuildPromoted = true;
+            return;
+          }
+        }
         const snapVarUnits = { ...varUnits };
         let result, isError = false;
-        try { result = evalFormula(formula, vars); }
+        try { result = evalFormula(formula, vars, pending || undefined); }
         catch(e) { result = e.message || 'Error'; isError = true; }
         chip.className = 'formula-chip' + (isError ? ' error' : '');
         const savedVarUnits = varUnits;
@@ -2674,6 +2911,14 @@ function rebuildVars() {
       }
     });
   });
+  // A promotion changes what later chips can see, so settle with another pass.
+  if (_rebuildPromoted && _rebuildDepth < 4) {
+    _rebuildPromoted = false;
+    _rebuildDepth++;
+    try { rebuildVars(); } finally { _rebuildDepth--; }
+    return;
+  }
+  _rebuildPromoted = false;
   renderSidebar();
   autoSave();
   // Release suppression after MutationObserver microtasks have fired and been ignored
@@ -2813,7 +3058,7 @@ document.addEventListener('keydown', e => {
         return;
       }
       try {
-        val = parseFloat(evalFormula(exprStr, vars).replace(/,/g, ''));
+        val = parseFloat(evalFormula(exprStr, vars, varName).replace(/,/g, ''));
         if (isNaN(val)) throw new Error('NaN');
         // Deliberately no unit here. An expression's unit is re-derived from its
         // operands on every render (rebuildVars/renderVarChipContent), so storing
@@ -2831,7 +3076,7 @@ document.addEventListener('keydown', e => {
           // the typed text just sat there with no chip and no error.)
           e.preventDefault();
           let result, isError = false;
-          try { result = evalFormula(exprStr, vars); }
+          try { result = evalFormula(exprStr, vars, varName); }
           catch(ex) { result = ex.message || 'Error'; isError = true; }
           const parent = node.parentNode;
           const frag = document.createDocumentFragment();
@@ -2890,7 +3135,7 @@ document.addEventListener('input', e => {
     const node = sel.getRangeAt(0).startContainer;
     if (node.nodeType !== Node.TEXT_NODE) { cancelFormula(); return; }
     const text = node.textContent;
-    let eqIdx = text.lastIndexOf('=');
+    let eqIdx = definitionEqIndex(text);
     if (eqIdx === -1) { cancelFormula(); return; }
     formulaBuffer = text.slice(eqIdx + 1);
   } else {
@@ -2947,6 +3192,25 @@ function restoreEditRange(ed) {
   return true;
 }
 
+// Index of the '=' that separates "name = expression", skipping comparison
+// operators and anything inside brackets. Using the last '=' broke equations:
+// "x = solver(a == b)" split at the '==' and left a fragment behind.
+function definitionEqIndex(text) {
+  let depth = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '(' || c === '[') depth++;
+    else if (c === ')' || c === ']') depth--;
+    else if (c === '=' && depth === 0) {
+      const prev = text[i-1], next = text[i+1];
+      if (prev === '<' || prev === '>' || prev === '!' || prev === '=') continue;
+      if (next === '=') { i++; continue; }
+      return i;
+    }
+  }
+  return -1;
+}
+
 function commitFormula(ed) {
   const sel = window.getSelection();
   if (!sel.rangeCount) { cancelFormula(); return; }
@@ -2954,7 +3218,7 @@ function commitFormula(ed) {
   const node = range.startContainer;
   if (node.nodeType !== Node.TEXT_NODE) { cancelFormula(); return; }
   const text = node.textContent;
-  let eqIdx = text.lastIndexOf('=');
+  let eqIdx = definitionEqIndex(text);
   if (eqIdx === -1) { cancelFormula(); return; }
   let formula = text.slice(eqIdx + 1).trim();
   if (!formula) { cancelFormula(); return; }
@@ -2997,7 +3261,7 @@ function commitFormula(ed) {
       if (conv) { varVal = conv.siVal; varSiUnit = conv.siUnitStr; }
       else { varVal = lit.val; varSiUnit = varUnit; }
     } else {
-      try { varVal = parseFloat(evalFormula(formula, vars).replace(/,/g, '')); } catch(e) { varVal = NaN; }
+      try { varVal = parseFloat(evalFormula(formula, vars, varName).replace(/,/g, '')); } catch(e) { varVal = NaN; }
       if (isNaN(varVal)) {
         const ue = extractValueAndUnit(formula);
         if (ue) {
@@ -3027,7 +3291,7 @@ function commitFormula(ed) {
   }
 
   let result, isError = false;
-  try { result = evalFormula(formula, vars); }
+  try { result = evalFormula(formula, vars, defName || undefined); }
   catch(ex) { result = ex.message || 'Error'; isError = true; }
   const parent = node.parentNode;
   const frag = document.createDocumentFragment();
@@ -3234,7 +3498,7 @@ function pasteLineToFragment(rawLine, wvars, wunits) {
       else { val = lit.val; siUnit = unit; }
       ok = true;
     } else try {
-      val = parseFloat(evalFormula(exprStr, wvars).replace(/,/g, ''));
+      val = parseFloat(evalFormula(exprStr, wvars, varName).replace(/,/g, ''));
       if (isNaN(val)) throw new Error('NaN');
       const inferred = evalUnitExpr(exprStr, wunits);
       if (inferred && Object.keys(inferred).length) { siUnit = unit = unitObjToStr(inferred); }
@@ -3262,7 +3526,7 @@ function pasteLineToFragment(rawLine, wvars, wunits) {
     // (consistent with the Enter-key handler); it keeps the variable name so a
     // corrected edit turns it back into a definition.
     let result, isError = false;
-    try { result = evalFormula(exprStr, wvars); } catch(ex) { result = ex.message || 'Error'; isError = true; }
+    try { result = evalFormula(exprStr, wvars, varName); } catch(ex) { result = ex.message || 'Error'; isError = true; }
     if (prefix) frag.appendChild(document.createTextNode(prefix));
     frag.appendChild(makeVarErrorChip(varName, exprStr, result, isError, dispUnit));
     frag.appendChild(document.createTextNode(' '));
