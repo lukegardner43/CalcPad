@@ -223,13 +223,21 @@ body{
   font-size:9px;color:var(--mid);margin-top:4px}
 
 /* ── Chips ── */
+/* Chips select as single units (user-select:all), not as unselectable holes.
+   With user-select:none the browser has nowhere to put a selection endpoint
+   inside a chip, so dragging across one expanded the selection out to whole
+   paragraphs — a drag over two variables would highlight everything around
+   them. Selecting a chip now takes the chip and nothing more. */
 .var-def-chip{display:inline-flex;align-items:baseline;font-family:Arial,sans-serif;
-  font-size:11px;font-style:italic;color:var(--dark);user-select:none;cursor:default;max-width:100%}
+  font-size:11px;font-style:italic;color:var(--dark);user-select:all;-webkit-user-select:all;
+  cursor:default;max-width:100%}
 .vdc-val{cursor:pointer;border-bottom:1px dotted var(--mid)}
 .vdc-val:hover{color:var(--rubine);border-bottom-color:var(--rubine)}
 .vdc-edit-input{border:none;border-bottom:1px solid var(--rubine);outline:none;background:transparent;
-  font-family:Arial,sans-serif;font-size:11px;font-style:italic;color:var(--dark);width:60px;padding:0 2px}
-.formula-chip{display:inline-flex;align-items:baseline;max-width:100%;cursor:default;user-select:none;vertical-align:middle}
+  font-family:Arial,sans-serif;font-size:11px;font-style:italic;color:var(--dark);width:60px;padding:0 2px;
+  user-select:text;-webkit-user-select:text} /* editable, so not atomic like its chip */
+.formula-chip{display:inline-flex;align-items:baseline;max-width:100%;cursor:default;
+  user-select:all;-webkit-user-select:all;vertical-align:middle}
 /* Both chip types must render maths at the surrounding text size — KaTeX's own
    default is 1.21em, which made variable chips jump in size next to formula
    chips and whenever one became the other. */
@@ -2146,8 +2154,15 @@ document.addEventListener('focusin', e => {
 // Clicking the empty space below the text would otherwise drop the caret at the editor's
 // container root, which the browser renders at the bottom-left corner — clashing with the
 // page border. Redirect that click to the end of the actual content instead (Word-like).
-document.addEventListener('mousedown', e => {
+//
+// This runs on click, not mousedown: starting a drag in that empty space used to move the
+// caret to the end of the document immediately, and the rest of the drag then selected
+// backwards from there — sweeping up a large block of unrelated text. Waiting for the click
+// and bailing out when something is selected leaves drag-selection alone.
+document.addEventListener('click', e => {
   if (!(e.target.classList && e.target.classList.contains('calc-area'))) return;
+  const sel0 = window.getSelection();
+  if (sel0 && sel0.rangeCount && !sel0.isCollapsed) return; // a drag-selection, not a bare click
   const ed = e.target;
   // Work out where the actual rendered content ends. Bare text typed directly
   // into the editor reports the editor itself as the event target, so we must
