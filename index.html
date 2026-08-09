@@ -230,7 +230,7 @@ body{
    and "all" makes WebKit swallow surrounding content to include the chip.
    Pasting is unaffected either way — chips rebuild from their data attributes,
    so even a half-covered chip comes back whole. */
-.var-def-chip{display:inline-flex;align-items:baseline;font-family:Arial,sans-serif;
+.var-def-chip{display:inline-block;font-family:Arial,sans-serif;
   font-size:11px;font-style:italic;color:var(--dark);user-select:text;-webkit-user-select:text;
   cursor:default;max-width:100%}
 .vdc-val{cursor:pointer;border-bottom:1px dotted var(--mid)}
@@ -238,7 +238,12 @@ body{
 .vdc-edit-input{border:none;border-bottom:1px solid var(--rubine);outline:none;background:transparent;
   font-family:Arial,sans-serif;font-size:11px;font-style:italic;color:var(--dark);width:60px;padding:0 2px;
   user-select:text;-webkit-user-select:text} /* editable, so not atomic like its chip */
-.formula-chip{display:inline-flex;align-items:baseline;max-width:100%;cursor:default;
+/* inline-block, not inline-flex: a flex container that is also
+   contenteditable="false" gives WebKit no text position to resolve a tap to, so
+   a drag starting in the blank area beside a chip anchored at the enclosing
+   block instead and selected everything above it. The inner segments still use
+   flex for their own alignment and wrapping. */
+.formula-chip{display:inline-block;max-width:100%;cursor:default;
   user-select:text;-webkit-user-select:text;vertical-align:middle}
 /* Both chip types must render maths at the surrounding text size — KaTeX's own
    default is 1.21em, which made variable chips jump in size next to formula
@@ -251,7 +256,8 @@ body{
 .var-def-chip.dup-name{outline:1px dashed var(--rubine);outline-offset:2px;border-radius:2px;opacity:.75}
 @media print{.var-def-chip.dup-name{outline:none;opacity:1}}
 .flhs{flex-shrink:0}
-.fseg-right{display:flex;flex-wrap:wrap;align-items:baseline;min-width:0}
+/* inline-flex so these still sit on one line inside the inline-block chip */
+.fseg-right{display:inline-flex;flex-wrap:wrap;align-items:baseline;min-width:0}
 .fseg{display:inline-flex;align-items:baseline}
 .feq{padding-right:0.15em}
 
@@ -3187,6 +3193,35 @@ document.addEventListener('selectionchange', () => {
     setTimeout(() => { _editCommitPending = false; }, 500);
   }
 });
+
+// Pressing in the blank area to the right of a line puts no text under the
+// pointer, so the browser has to guess a position — and next to a chip it can
+// anchor at the enclosing block instead of the line, after which any drag
+// selects everything above. Resolve it ourselves before the drag begins: the
+// caret belongs at the end of the line that was pressed. Only the empty space
+// past the end of a line is claimed; presses on text or chips are left alone.
+document.addEventListener('pointerdown', e => {
+  const ed = e.target && e.target.closest ? e.target.closest('.calc-area') : null;
+  if (!ed) return;
+  if (e.target.closest('.formula-chip,.var-def-chip,.calc-table,img,.calc-img-wrap,input,button,select,textarea')) return;
+  // The block that owns the pressed line. Without one (bare text directly in the
+  // editor) there is nothing safe to collapse to, so leave it to the browser.
+  const line = Array.from(ed.children).find(el => {
+    const r = el.getBoundingClientRect();
+    return e.clientY >= r.top && e.clientY <= r.bottom;
+  });
+  if (!line) return;
+  const rng = document.createRange();
+  rng.selectNodeContents(line);
+  const band = Array.from(rng.getClientRects())
+    .filter(r => e.clientY >= r.top - 1 && e.clientY <= r.bottom + 1);
+  if (!band.length) return;
+  if (e.clientX <= Math.max(...band.map(r => r.right)) + 1) return; // on content
+  rng.collapse(false);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(rng);
+}, true);
 
 // Safety net for selections that highlight a swathe of the page but hold no
 // text. Tapping in the blank area beside a chip could leave the browser unable
