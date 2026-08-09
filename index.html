@@ -223,13 +223,15 @@ body{
   font-size:9px;color:var(--mid);margin-top:4px}
 
 /* ── Chips ── */
-/* Chips select as single units (user-select:all), not as unselectable holes.
-   With user-select:none the browser has nowhere to put a selection endpoint
-   inside a chip, so dragging across one expanded the selection out to whole
-   paragraphs — a drag over two variables would highlight everything around
-   them. Selecting a chip now takes the chip and nothing more. */
+/* Chips take part in selection as ordinary text. They stay atomic for editing
+   because they are contenteditable="false"; user-select is left alone on
+   purpose. Both extremes misbehave: "none" leaves the browser nowhere to put a
+   selection endpoint, so a drag across a chip expanded out to whole paragraphs,
+   and "all" makes WebKit swallow surrounding content to include the chip.
+   Pasting is unaffected either way — chips rebuild from their data attributes,
+   so even a half-covered chip comes back whole. */
 .var-def-chip{display:inline-flex;align-items:baseline;font-family:Arial,sans-serif;
-  font-size:11px;font-style:italic;color:var(--dark);user-select:all;-webkit-user-select:all;
+  font-size:11px;font-style:italic;color:var(--dark);user-select:text;-webkit-user-select:text;
   cursor:default;max-width:100%}
 .vdc-val{cursor:pointer;border-bottom:1px dotted var(--mid)}
 .vdc-val:hover{color:var(--rubine);border-bottom-color:var(--rubine)}
@@ -237,7 +239,7 @@ body{
   font-family:Arial,sans-serif;font-size:11px;font-style:italic;color:var(--dark);width:60px;padding:0 2px;
   user-select:text;-webkit-user-select:text} /* editable, so not atomic like its chip */
 .formula-chip{display:inline-flex;align-items:baseline;max-width:100%;cursor:default;
-  user-select:all;-webkit-user-select:all;vertical-align:middle}
+  user-select:text;-webkit-user-select:text;vertical-align:middle}
 /* Both chip types must render maths at the surrounding text size — KaTeX's own
    default is 1.21em, which made variable chips jump in size next to formula
    chips and whenever one became the other. */
@@ -3185,6 +3187,25 @@ document.addEventListener('selectionchange', () => {
     setTimeout(() => { _editCommitPending = false; }, 500);
   }
 });
+
+// Safety net for selections that highlight a swathe of the page but hold no
+// text. Tapping in the blank area beside a chip could leave the browser unable
+// to resolve a text position there; instead of a caret it would anchor the
+// selection at a block boundary and paint everything above as selected. Such a
+// range contains no characters, so nothing is lost by collapsing it back to a
+// caret — a real selection, even of a single chip, always carries text.
+function collapseEmptySelection() {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount || sel.isCollapsed) return;
+  if (sel.toString().length) return;                    // genuine selection
+  const range = sel.getRangeAt(0);
+  let n = range.startContainer;
+  if (n.nodeType !== Node.ELEMENT_NODE) n = n.parentElement;
+  if (!n || !n.closest || !n.closest('.calc-area')) return;
+  sel.collapseToEnd();
+}
+document.addEventListener('mouseup', () => setTimeout(collapseEmptySelection, 0));
+document.addEventListener('touchend', () => setTimeout(collapseEmptySelection, 0), { passive: true });
 
 // Remember the most recent caret position inside any editor. Clicking a toolbar
 // button (Table / Image) blurs the contenteditable and loses the selection, so
