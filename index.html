@@ -3200,27 +3200,74 @@ document.addEventListener('selectionchange', () => {
 // selects everything above. Resolve it ourselves before the drag begins: the
 // caret belongs at the end of the line that was pressed. Only the empty space
 // past the end of a line is claimed; presses on text or chips are left alone.
+function caretRangeAt(x, y) {
+  if (document.caretRangeFromPoint) return document.caretRangeFromPoint(x, y);
+  if (document.caretPositionFromPoint) {
+    const cp = document.caretPositionFromPoint(x, y);
+    if (cp) { const r = document.createRange(); r.setStart(cp.offsetNode, cp.offset); r.collapse(true); return r; }
+  }
+  return null;
+}
+
 document.addEventListener('pointerdown', e => {
   const ed = e.target && e.target.closest ? e.target.closest('.calc-area') : null;
-  if (!ed) return;
+  if (!ed || !ed.hasChildNodes()) return;
   if (e.target.closest('.formula-chip,.var-def-chip,.calc-table,img,.calc-img-wrap,input,button,select,textarea')) return;
-  // The block that owns the pressed line. Without one (bare text directly in the
-  // editor) there is nothing safe to collapse to, so leave it to the browser.
-  const line = Array.from(ed.children).find(el => {
-    const r = el.getBoundingClientRect();
-    return e.clientY >= r.top && e.clientY <= r.bottom;
-  });
-  if (!line) return;
-  const rng = document.createRange();
-  rng.selectNodeContents(line);
-  const band = Array.from(rng.getClientRects())
-    .filter(r => e.clientY >= r.top - 1 && e.clientY <= r.bottom + 1);
-  if (!band.length) return;
-  if (e.clientX <= Math.max(...band.map(r => r.right)) + 1) return; // on content
-  rng.collapse(false);
+  // Work from the visual line the press is level with, measured across the whole
+  // editor. Looking at block children alone missed lines that sit in the editor
+  // as bare text, and collapsing to a block's end overshot when it wrapped.
+  const all = document.createRange();
+  all.selectNodeContents(ed);
+  const band = Array.from(all.getClientRects())
+    .filter(r => r.width > 0 && e.clientY >= r.top - 1 && e.clientY <= r.bottom + 1);
+  if (!band.length) return;                  // below all content — handled on click
+  const right = Math.max(...band.map(r => r.right));
+  if (e.clientX <= right + 1) return;        // pressed on content, not past it
+  // Ask for the position on the line's last pixel of content, where there is
+  // real text to resolve against, rather than the empty space to its right.
+  const mid = band.reduce((a, r) => a + (r.top + r.bottom) / 2, 0) / band.length;
+  const rng = caretRangeAt(right - 1, mid);
+  if (!rng) return;
+  let node = rng.startContainer;
+  if (node.nodeType !== Node.ELEMENT_NODE) node = node.parentElement;
+  const chip = node && node.closest ? node.closest('.formula-chip,.var-def-chip') : null;
+  if (chip) rng.setStartAfter(chip);         // never land inside a chip
+  rng.collapse(true);
   const sel = window.getSelection();
   sel.removeAllRanges();
   sel.addRange(rng);
+}, true);
+
+// A quick, still tap must never leave text selected. When the browser resolves a
+// press badly it can produce a large selection from a gesture the user meant as
+// a click, which is what made a tap beside a chip highlight the lines above.
+// Long presses (the iOS select gesture) and double-taps are left alone.
+let _tapStart = null, _tapTimer = null, _lastDblClick = 0;
+document.addEventListener('dblclick', () => { _lastDblClick = Date.now(); clearTimeout(_tapTimer); }, true);
+document.addEventListener('pointerdown', e => {
+  clearTimeout(_tapTimer); // a pending check from the first click of a double-click
+  const ed = e.target && e.target.closest ? e.target.closest('.calc-area') : null;
+  _tapStart = ed ? { x: e.clientX, y: e.clientY, t: Date.now() } : null;
+}, true);
+// Decided on click rather than pointerup: only there is detail a reliable click
+// count, and a double-click or shift-click is a deliberate selection that must
+// survive. Everything with a modifier held is left alone for the same reason.
+document.addEventListener('click', e => {
+  const start = _tapStart;
+  _tapStart = null;
+  if (!start) return;
+  if (e.detail > 1 || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (Date.now() - start.t > 350) return;                                  // deliberate long press
+  if (Math.abs(e.clientX - start.x) > 6 || Math.abs(e.clientY - start.y) > 6) return; // a drag
+  clearTimeout(_tapTimer);
+  _tapTimer = setTimeout(() => {
+    if (Date.now() - _lastDblClick < 500) return; // a word/paragraph selection landed meanwhile
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || sel.isCollapsed) return;
+    let n = sel.getRangeAt(0).startContainer;
+    if (n.nodeType !== Node.ELEMENT_NODE) n = n.parentElement;
+    if (n && n.closest && n.closest('.calc-area')) sel.collapseToEnd();
+  }, 60);
 }, true);
 
 // Safety net for selections that highlight a swathe of the page but hold no
