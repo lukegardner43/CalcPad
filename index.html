@@ -764,6 +764,13 @@ const FOOTER_TEXT = 'Alpha — updated 13.07.26';
 
 // ── Variable store ─────────────────────────────────────────
 
+// Values that came out of a document — variable names, expressions, units,
+// results — are interpolated into markup below. A crafted file could put an
+// <img onerror> in data-var-name and have it run when the sidebar drew. Escape
+// anything that did not originate in this file.
+const escHtml = v => String(v == null ? '' : v).replace(/[&<>"']/g,
+  c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+
 function renderSidebar() {
   const list  = document.getElementById('vsList');
   const empty = document.getElementById('vsEmpty');
@@ -812,9 +819,9 @@ function renderSidebar() {
     const row = document.createElement('div');
     row.className = 'vs-row';
     row.innerHTML =
-      `<span class="vs-name">${name}</span>` +
+      `<span class="vs-name">${escHtml(name)}</span>` +
       `<span class="vs-eq">=</span>` +
-      `<span class="vs-val">${dispVal}${unit ? ' ' + unit : ''}</span>`;
+      `<span class="vs-val">${escHtml(dispVal)}${unit ? ' ' + escHtml(unit) : ''}</span>`;
     list.appendChild(row);
   });
 }
@@ -973,6 +980,28 @@ function transformPowers(expr) {
   }
 }
 
+// Nothing but numbers, operators and calls into FUNS may reach new Function.
+// A formula is not only something typed here — it travels inside documents, in
+// data-var-expr and data-formula, and every chip is evaluated automatically when
+// one is opened or pasted. Unfiltered, "fetch(...)" in a saved file was simply
+// run. Identifiers are the lever (they reach the page's globals) and quotes are
+// the payload (they let Function build code), so neither is allowed through.
+// An unknown identifier is far more often a variable the user has not defined
+// yet, so it keeps that wording.
+function assertSafeExpr(js, free) {
+  const forbidden = /[;{}\[\]"'`\\]|=>/.exec(js);
+  if (forbidden) throw new Error('That is not a valid formula');
+  const idRe = /(?<![\w$.])[A-Za-z_$][A-Za-z0-9_$]*/g;
+  let m;
+  while ((m = idRe.exec(js))) {
+    const name = m[0];
+    if (name === '__F') continue;              // the function table itself
+    if (free && free.has(name)) continue;      // the solver's unknown
+    throw new Error(`${name} is not defined`);
+  }
+  return js;
+}
+
 // Turn a CalcPad expression into evaluable JavaScript. Names in `free` are left
 // as bare identifiers instead of being substituted, so the solver can bind one
 // as a function parameter and vary it.
@@ -1042,10 +1071,11 @@ function toJsExpr(raw, variables_, free) {
   }
   // [A-Z_][A-Z0-9_]* — the trailing digits matter: a bare [A-Z_]+ never matched
   // ATAN2( , so it survived as a bare identifier and threw "ATAN2 is not defined".
-  return expr.replace(/\b([A-Z_][A-Z0-9_]*)\s*\(/g, (_,nm) => {
+  expr = expr.replace(/\b([A-Z_][A-Z0-9_]*)\s*\(/g, (_,nm) => {
     if (FUNS[nm]) return `__F.${nm}(`;
     throw new Error(`Unknown: ${nm}`);
   });
+  return assertSafeExpr(expr, free);
 }
 
 // solveFor names the variable being defined; it is only needed for solver().
@@ -1948,13 +1978,13 @@ function renderVarChipContent(chip) {
       const specUnitObj = parseUnitStr(displayUnit);
       if (Object.keys(specUnitObj).length) {
         if (getUnitConversionFactor(specUnitObj) === null) {
-          chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">${name}: unknown unit [${displayUnit}]</span>`;
+          chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">${escHtml(name)}: unknown unit [${escHtml(displayUnit)}]</span>`;
           chip.title = `[${displayUnit}] is not a unit CalcPad knows`;
           return;
         }
         const exF = toFundamental(exprUnit), spF = toFundamental(specUnitObj);
         if (!exF || !spF || !unitObjEq(exF, spF)) {
-          chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">${name}: unit mismatch [${displayUnit}] vs [${unitObjToStr(exprUnit)}]</span>`;
+          chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">${escHtml(name)}: unit mismatch [${escHtml(displayUnit)}] vs [${escHtml(unitObjToStr(exprUnit))}]</span>`;
           chip.title = `Unit mismatch: formula gives [${unitObjToStr(exprUnit)}] but [${displayUnit}] was specified`;
           return;
         }
@@ -1998,7 +2028,7 @@ function renderVarChipContent(chip) {
         `<span class="fseg"><span class="feq"> = </span>${kx(latexVal)}</span>` +
         `</span>`;
     } catch(e) {
-      inner = `<span class="vdc-name">${name} = ${expr} = </span><span class="vdc-val">${displayValStr}${displayUnit ? ' ' + displayUnit : (unit ? ' ' + unit : '')}</span>`;
+      inner = `<span class="vdc-name">${escHtml(name)} = ${escHtml(expr)} = </span><span class="vdc-val">${escHtml(displayValStr)}${displayUnit ? ' ' + escHtml(displayUnit) : (unit ? ' ' + escHtml(unit) : '')}</span>`;
     }
     chip.innerHTML = inner;
     chip.title = `${name} = ${expr} = ${displayValStr}${displayUnit ? ' ' + displayUnit : (unit ? ' ' + unit : '')}`;
@@ -2014,7 +2044,7 @@ function renderVarChipContent(chip) {
       );
       chip.innerHTML = `<span class="vdc-name">${katexHtml}</span>`;
     } catch(e) {
-      chip.innerHTML = `<span class="vdc-name">${name} = </span><span class="vdc-val">${displayVal} ${unit}</span>`;
+      chip.innerHTML = `<span class="vdc-name">${escHtml(name)} = </span><span class="vdc-val">${escHtml(displayVal)} ${escHtml(unit)}</span>`;
     }
     chip.title = `Variable "${name}" = ${displayVal} ${unit}`;
   } else {
@@ -2030,8 +2060,8 @@ function renderVarChipContent(chip) {
         `<span class="vdc-val">${fmtNum(val)}</span>`;
     } catch(e) {
       chip.innerHTML =
-        `<span class="vdc-name">${name} = </span>` +
-        `<span class="vdc-val">${fmtNum(val)}</span>`;
+        `<span class="vdc-name">${escHtml(name)} = </span>` +
+        `<span class="vdc-val">${escHtml(fmtNum(val))}</span>`;
     }
     chip.title = `Variable "${name}" = ${fmtNum(val)} — click value to edit`;
   }
@@ -2243,7 +2273,7 @@ function setFormulaContent(chip, formula, result, isError) {
       return;
     }
     if (parts.mismatch) {
-      chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">unit mismatch: result is [${parts.mismatch}] not [${outputUnit}]</span>`;
+      chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">unit mismatch: result is [${escHtml(parts.mismatch)}] not [${escHtml(outputUnit)}]</span>`;
       chip.className = 'formula-chip error';
       chip.title = `Unit mismatch: formula gives [${parts.mismatch}] but [${outputUnit}] was specified`;
       return;
@@ -2258,7 +2288,7 @@ function setFormulaContent(chip, formula, result, isError) {
       `<span class="fseg"><span class="feq"> = </span>${kx(rhs)}</span>` +
       `</span>`;
   } catch(e) {
-    chip.innerHTML = `<span style="font-style:italic">=${formula} = ${result}${outputUnit ? ' ' + outputUnit : ''}</span>`;
+    chip.innerHTML = `<span style="font-style:italic">=${escHtml(formula)} = ${escHtml(result)}${outputUnit ? ' ' + escHtml(outputUnit) : ''}</span>`;
   }
   chip.title = `=${formula} = ${result}${outputUnit ? ' ' + outputUnit : ''}`;
 }
@@ -3985,11 +4015,25 @@ function sanitisePastedChunk(html) {
   const tpl = document.createElement('template');
   tpl.innerHTML = html;
   const frag = tpl.content;
-  frag.querySelectorAll('script,style,link,meta,title,iframe,object,embed,form,input,button').forEach(n => n.remove());
+  // base retargets every relative URL on the page, so it does not belong in a
+  // pasted or loaded document either.
+  frag.querySelectorAll('script,style,link,meta,title,iframe,object,embed,form,input,button,base').forEach(n => n.remove());
   frag.querySelectorAll('*').forEach(el => {
     Array.from(el.attributes).forEach(a => {
-      if (/^on/i.test(a.name) || /^(src|href)$/i.test(a.name) && /^\s*javascript:/i.test(a.value))
-        el.removeAttribute(a.name);
+      const n = a.name.toLowerCase();
+      if (/^on/i.test(n)) { el.removeAttribute(a.name); return; }
+      // Anything the browser fetches by itself must be a data: image. CalcPad's
+      // own images always are, and a remote one would let a document report back
+      // — who opened it, from which address, and when — the moment it is opened.
+      if (/^(src|srcset|background|poster|action|formaction|data|xlink:href)$/.test(n)) {
+        if (!/^\s*data:image\//i.test(a.value)) el.removeAttribute(a.name);
+        return;
+      }
+      // Links are followed only on a click, so ordinary web addresses are fine;
+      // script-bearing schemes are not.
+      if (n === 'href' && !/^\s*(https?:|mailto:|#)/i.test(a.value)) { el.removeAttribute(a.name); return; }
+      if (n === 'style' && /url\s*\(/i.test(a.value))
+        el.setAttribute('style', a.value.replace(/url\s*\([^)]*\)/gi, ''));
     });
     el.removeAttribute('data-reflow-split');
     el.removeAttribute('data-tbl-handlers');
