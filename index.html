@@ -807,14 +807,18 @@ const FUNS = {
   COUNT:   (...a) => a.flat().length,
   SQRT:    x => Math.sqrt(x),
   ABS:     x => Math.abs(x),
-  ROUND:   (x,d=0) => parseFloat(x.toFixed(d)),
+  // Excel semantics: negative digits round to tens/hundreds. Avoids toFixed,
+  // which throws outside 0..100 and leaked a raw JS message.
+  ROUND:   (x,d=0) => { const f = Math.pow(10, Math.trunc(d) || 0); return Math.round(x * f) / f; },
   POW:     (x,y) => Math.pow(x,y),
   IF:      (c,t,f) => c ? t : f,
   PI:      () => Math.PI,
   E:       () => Math.E,
   FLOOR:   x => Math.floor(x),
   CEIL:    x => Math.ceil(x),
-  MOD:     (a,b) => a%b,
+  // Excel's MOD (result takes the divisor's sign), not JS's remainder:
+  // MOD(-7,3) is 2, where a%b would give -1.
+  MOD:     (a,b) => b === 0 ? NaN : ((a % b) + b) % b,
   LOG:     (x,b) => b ? Math.log(x)/Math.log(b) : Math.log(x),
   PERCENT: (p,w) => (p/w)*100,
   EXP:     x => Math.exp(x),
@@ -848,7 +852,9 @@ const DIMENSIONLESS_FUNS = new Set([
   'EXP','LOG','DEG','RAD','COUNT','PERCENT',
 ]);
 
-const MATH_CONSTS = { pi: Math.PI };
+// Usable without parentheses. The substitution step skips names followed by
+// '(', so PI() and E() still resolve as functions.
+const MATH_CONSTS = { pi: Math.PI, PI: Math.PI, E: Math.E };
 
 // Rewrite ^ as ** with standard maths precedence. A plain /\^/g → '**' replace
 // breaks on unary minus: JS rejects -a**b outright, and even when it parses,
@@ -949,8 +955,40 @@ function transformPowers(expr) {
 // Turn a CalcPad expression into evaluable JavaScript. Names in `free` are left
 // as bare identifiers instead of being substituted, so the solver can bind one
 // as a function parameter and vary it.
+// Characters that arrive when text is pasted from Word, a PDF or a webpage and
+// mean exactly what their ASCII counterparts do.
+function normaliseSymbols(expr) {
+  return String(expr)
+    .replace(/[−‒–—―]/g, '-')  // minus sign, figure/en/em dashes
+    .replace(/[×⋅∙]/g, '*')              // × · ∙
+    .replace(/[÷∕]/g, '/')                    // ÷ ∕
+    .replace(/[   ]/g, ' ');             // non-breaking spaces
+}
+
+// Inside a function call a comma separates arguments; anywhere else the only
+// sensible reading is a thousands separator. JavaScript would treat that as the
+// comma operator and silently throw away everything before it — "1,200 + 300"
+// evaluated to 500 with no error at all. Strip those, and refuse a comma that
+// is neither rather than returning a number the user never asked for.
+function normaliseCommas(expr) {
+  if (expr.indexOf(',') === -1) return expr;
+  let out = '';
+  const stack = [];
+  for (let i = 0; i < expr.length; i++) {
+    const c = expr[i];
+    if (c === '(') { stack.push(/[a-zA-Z0-9_]\s*$/.test(out) ? 'call' : 'group'); out += c; continue; }
+    if (c === ')') { stack.pop(); out += c; continue; }
+    if (c === ',' && stack[stack.length - 1] !== 'call') {
+      if (/\d\s*$/.test(out) && /^\s*\d{3}(?!\d)/.test(expr.slice(i + 1))) continue; // thousands separator
+      throw new Error('Unexpected comma — use it to separate function arguments, or as a thousands separator');
+    }
+    out += c;
+  }
+  return out;
+}
+
 function toJsExpr(raw, variables_, free) {
-  let expr = String(raw).trim();
+  let expr = normaliseCommas(normaliseSymbols(String(raw).trim()));
   // Normalise function names to uppercase so sqrt(), Sqrt(), SQRT() all work.
   // Only uppercases identifiers immediately followed by '(' that aren't variable names.
   const varNames = new Set(Object.keys(variables_));
@@ -960,23 +998,26 @@ function toJsExpr(raw, variables_, free) {
     if (varNames.has(name)) return m;
     return FUNS[up] ? up + m.slice(name.length) : m;
   });
-  expr = transformPowers(expr);
-  // Pre-process unit literals: "5kN" → 5000, "100mm" → 0.1, "1m" → 1 (SI values)
+  // Unit literals resolve BEFORE powers, so an exponent binds to the unit rather
+  // than to the value: "2m^2" is two square metres (2), not (2 m) squared (4).
   {
     const unitSymsSorted = Object.keys(UNIT_CONVERSIONS).sort((a,b) => b.length - a.length);
     const unitAltStr = unitSymsSorted.map(u => u.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
     // Negative lookbehind: don't match digits that are part of a variable name (e.g. F1kN).
-    const unitLitRe = new RegExp(`(?<![a-zA-Z0-9_])((?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][+-]?\\d+)?)\\s*(${unitAltStr})(?![a-zA-Z0-9_])`, 'g');
-    expr = expr.replace(unitLitRe, (match, numStr, unit) => {
+    const unitLitRe = new RegExp(`(?<![a-zA-Z0-9_])((?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][+-]?\\d+)?)\\s*(${unitAltStr})(?:\\s*\\^\\s*(-?\\d+))?(?![a-zA-Z0-9_])`, 'g');
+    expr = expr.replace(unitLitRe, (match, numStr, unit, exp) => {
       if (varNames.has(unit)) return match;
-      const factor = UNIT_CONVERSIONS[unit];
-      return String(parseFloat(numStr) * factor);
+      const factor = Math.pow(UNIT_CONVERSIONS[unit], exp === undefined ? 1 : parseInt(exp, 10));
+      return '(' + (parseFloat(numStr) * factor) + ')';
     });
   }
+  expr = transformPowers(expr);
   const vnames = Object.keys(variables_).sort((a,b) => b.length - a.length);
   for (const vn of vnames) {
     if (free && free.has(vn)) continue;
-    expr = expr.replace(new RegExp(`\\b${vn}\\b`, 'g'), `(${variables_[vn]})`);
+    // Not a name being called as a function — PI() must stay a call even though
+    // PI is also a constant.
+    expr = expr.replace(new RegExp(`\\b${vn}\\b(?!\\s*\\()`, 'g'), `(${variables_[vn]})`);
   }
   // [A-Z_][A-Z0-9_]* — the trailing digits matter: a bare [A-Z_]+ never matched
   // ATAN2( , so it survived as a bare identifier and threw "ATAN2 is not defined".
@@ -1006,8 +1047,21 @@ function evalFormula(raw, variables, solveFor) {
 // may use x directly, or through other variables — those are substituted in
 // first, so "d = solver(M_Rd == M_Ed)" works when M_Rd is itself a formula in d
 // (and M_Rd may be built from further formulas in turn).
-const SOLVER_RE = /^\s*solver\s*\(([\s\S]+)\)\s*$/i;
-function isSolverExpr(s) { return SOLVER_RE.test(String(s == null ? '' : s)); }
+// The inner text of "solver( … )", or null. Matched by walking to the paren that
+// closes the opening one: a greedy regex also matched "solver(a==b)*(2)", which
+// then failed deep inside with an unhelpful message.
+function solverInner(s) {
+  const str = String(s == null ? '' : s).trim();
+  const open = str.search(/^solver\s*\(/i) === 0 ? str.indexOf('(') : -1;
+  if (open === -1) return null;
+  let d = 0;
+  for (let i = open; i < str.length; i++) {
+    if (str[i] === '(') d++;
+    else if (str[i] === ')') { d--; if (d === 0) return i === str.length - 1 ? str.slice(open + 1, i) : null; }
+  }
+  return null;
+}
+function isSolverExpr(s) { return solverInner(s) !== null; }
 
 // Split "a == b" at the top-level equals. Accepts '=' as well as '==', but not
 // the comparison operators, which are meaningful inside either side.
@@ -1060,7 +1114,9 @@ function chipValues() {
 // Substitute variable formulas into `expr` until only `target` and plain-valued
 // variables are left, turning the equation into a function of `target` alone.
 function expandExpr(expr, target, exprMap, depth) {
-  if (depth > 25) return expr; // cyclic definitions — stop unrolling
+  // Depth bounds cyclic definitions; length bounds the multiplicative growth a
+  // variable referenced several times causes at each round.
+  if (depth > 25 || String(expr).length > 20000) return expr;
   let changed = false;
   const out = String(expr).replace(/\b([a-zA-Z_][a-zA-Z0-9_]*)\b(\s*\()?/g, (m, name, call) => {
     if (call) return m;                 // a function call, not a variable
@@ -1133,10 +1189,10 @@ function findRoot(f, guess) {
 }
 
 function solveForVariable(raw, target, variables) {
-  const m = String(raw).match(SOLVER_RE);
-  if (!m) throw new Error('Not a solver expression');
+  const inner = solverInner(raw);
+  if (inner === null) throw new Error('Not a solver expression');
   if (!target) throw new Error('solver() must define a variable, e.g. x = solver(a == b)');
-  const sides = splitEquation(m[1]);
+  const sides = splitEquation(inner);
   if (!sides) throw new Error('solver() needs an equation, e.g. solver(a == b)');
 
   const exprMap = varExprMap();
@@ -1144,6 +1200,10 @@ function solveForVariable(raw, target, variables) {
   const lhs = expandExpr(sides[0], target, exprMap, 0);
   const rhs = expandExpr(sides[1], target, exprMap, 0);
   if (!lhs.trim() || !rhs.trim()) throw new Error('solver() needs an expression on both sides');
+  // Repeated references multiply on every round of substitution, so a deep
+  // chain can explode into millions of characters and hang the tab.
+  if (lhs.length + rhs.length > 20000)
+    throw new Error('The equation expands too far — simplify the formulas it refers to');
 
   // Live values win over the chip snapshot, which only fills in variables that
   // sit further down the page and so have not been evaluated in this pass yet.
@@ -1192,13 +1252,17 @@ function solveForVariable(raw, target, variables) {
   if (root === null || !isFinite(root)) throw new Error(`No solution found for ${target}`);
   // Confirm it really is a root — the secant path can stall on a flat section.
   const check = Math.abs(residual(root));
-  const magnitude = Math.max(1, Math.abs(residual(root + 1)) + Math.abs(root));
+  // A NaN probe (root+1 outside the domain) must not make this comparison
+  // vacuously true and wave through a non-root.
+  let probe; try { probe = Math.abs(residual(root + 1)); } catch (e) { probe = 0; }
+  const magnitude = Math.max(1, (isFinite(probe) ? probe : 0) + Math.abs(root));
   if (!isFinite(check) || check > 1e-6 * magnitude) throw new Error(`No solution found for ${target}`);
   return root;
 }
 
 function fmtNum(n) {
-  const r = Math.round(n * 1e10) / 1e10;
+  let r = Math.round(n * 1e10) / 1e10;
+  if (r === 0) r = 0; // collapse -0, which otherwise prints as "-0"
   if (Number.isInteger(r)) return r.toLocaleString('en-GB');
   // Use toPrecision on the original value (not the rounded r) to preserve enough
   // significant figures for downstream unit conversions, e.g. 4.167e-7 m³ → 416.67 mm³.
@@ -1208,7 +1272,8 @@ function fmtNum(n) {
 
 // For display only: 2dp for numbers ≥ 0.01, 3 sig-figs for smaller
 function fmtNumDisplay(n) {
-  const r = Math.round(n * 1e10) / 1e10;
+  let r = Math.round(n * 1e10) / 1e10;
+  if (r === 0) r = 0;
   if (Number.isInteger(r)) return r.toLocaleString('en-GB');
   if (Math.abs(r) < 0.01) return parseFloat(r.toPrecision(3)).toString();
   return parseFloat(r.toFixed(2)).toString();
@@ -1256,8 +1321,9 @@ function parseUnitStr(unitStr) {
   function addTerms(str, sign) {
     str.split('*').forEach(part => {
       const t = part.trim(); if (!t) return;
-      const m = t.match(/^([a-zA-Z]+)(?:\^?(\d+))?$/);
-      if (m) { const sym=m[1], exp=m[2]?parseInt(m[2]):1; result[sym]=(result[sym]||0)+sign*exp; if(!result[sym])delete result[sym]; }
+      // Negative exponents are allowed, so "m^-2" reads the same as "1/m^2".
+      const m = t.match(/^([a-zA-Z]+)(?:\^?(-?\d+))?$/);
+      if (m) { const sym=m[1], exp=m[2]?parseInt(m[2],10):1; result[sym]=(result[sym]||0)+sign*exp; if(!result[sym])delete result[sym]; }
     });
   }
   const parts = s.split('/');
@@ -1554,6 +1620,13 @@ function tokenize(expr) {
     if (/\d/.test(expr[i]) || (expr[i] === '.' && i+1 < expr.length && /\d/.test(expr[i+1]))) {
       let n = '';
       while (i < expr.length && /[\d.]/.test(expr[i])) n += expr[i++];
+      // Scientific notation is one number. Splitting "1e5" into 1 and "e5" made
+      // toLatex render it as just "1" while the value was 100,000.
+      if (expr[i] === 'e' || expr[i] === 'E') {
+        let j = i + 1;
+        if (expr[j] === '+' || expr[j] === '-') j++;
+        if (/\d/.test(expr[j] || '')) { while (i < j) n += expr[i++]; while (i < expr.length && /\d/.test(expr[i])) n += expr[i++]; }
+      }
       toks.push({ t: 'num', v: n });
     } else if (/[a-zA-Z_]/.test(expr[i])) {
       let s = '';
@@ -1600,7 +1673,10 @@ function nameToLatex(name) {
 }
 
 function toLatex(rawFormula, subsMap) {
-  let formula = rawFormula;
+  // Same normalisation the evaluator applies, so what is rendered matches what
+  // is computed (thousands separators in particular).
+  let formula = normaliseSymbols(rawFormula);
+  try { formula = normaliseCommas(formula); } catch (e) { /* render it as typed */ }
   // Normalise function names to uppercase before tokenising
   formula = formula.replace(/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*(?=\()/g, (m, name) => {
     let up = name.toUpperCase();
@@ -1739,8 +1815,24 @@ function toLatex(rawFormula, subsMap) {
           !(subsMap && Object.prototype.hasOwnProperty.call(subsMap, nxt.v)) &&
           !Object.prototype.hasOwnProperty.call(vars, nxt.v)) {
         consume();
+        // An exponent after the unit belongs to the unit: "2m^2" is two square
+        // metres, so it renders as 2 m² rather than (2 m)².
+        if (peek().t === '^') {
+          const save = pos;
+          consume();
+          let sign = '';
+          if (peek().t === '-') { consume(); sign = '-'; }
+          if (peek().t === 'num') {
+            const e = consume().v;
+            return tok.v + unitToLatex(nxt.v + '^' + sign + e);
+          }
+          pos = save;
+        }
         return tok.v + unitToLatex(nxt.v);
       }
+      // Scientific notation reads better as a power of ten than as "1e5".
+      const sci = /^(\d*\.?\d+)[eE]([+-]?\d+)$/.exec(tok.v);
+      if (sci) return sci[1] + '{\\times}10^{' + parseInt(sci[2], 10) + '}';
       return tok.v;
     }
     if (tok.t === 'id') {
