@@ -309,7 +309,7 @@ body{
 .calc-img-wrap img{display:block;max-width:100%;height:auto;cursor:default;outline:none}
 .calc-img-wrap.selected img{outline:2px solid var(--rubine)}
 .img-resize-handle{display:none;position:absolute;bottom:-5px;right:-5px;width:14px;height:14px;
-  background:var(--rubine);border:2px solid #fff;border-radius:50%;cursor:se-resize;z-index:20}
+  background:var(--rubine);border:2px solid #fff;border-radius:50%;cursor:se-resize;z-index:20;touch-action:none}
 .calc-img-wrap.selected .img-resize-handle{display:block}
 .img-size-label{display:none;position:absolute;bottom:4px;left:4px;font-size:9px;
   background:rgba(0,0,0,.55);color:#fff;padding:1px 5px;border-radius:2px;pointer-events:none}
@@ -1947,6 +1947,11 @@ function renderVarChipContent(chip) {
     if (displayUnit && exprUnit && Object.keys(exprUnit).length) {
       const specUnitObj = parseUnitStr(displayUnit);
       if (Object.keys(specUnitObj).length) {
+        if (getUnitConversionFactor(specUnitObj) === null) {
+          chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">${name}: unknown unit [${displayUnit}]</span>`;
+          chip.title = `[${displayUnit}] is not a unit CalcPad knows`;
+          return;
+        }
         const exF = toFundamental(exprUnit), spF = toFundamental(specUnitObj);
         if (!exF || !spF || !unitObjEq(exF, spF)) {
           chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">${name}: unit mismatch [${displayUnit}] vs [${unitObjToStr(exprUnit)}]</span>`;
@@ -2185,6 +2190,8 @@ function formulaDisplayParts(formula, result, outputUnit) {
       // display it. Check they're compatible, then convert the SI value.
       const specUnitObj = parseUnitStr(outputUnit);
       if (Object.keys(specUnitObj).length) {
+        // An unrecognised symbol is not a dimension clash — say so plainly.
+        if (getUnitConversionFactor(specUnitObj) === null) return { unknownUnit: outputUnit };
         const resF = toFundamental(resUnit), specF = toFundamental(specUnitObj);
         if (!resF || !specF || !unitObjEq(resF, specF)) return { mismatch: unitObjToStr(resUnit) };
       }
@@ -2225,6 +2232,16 @@ function setFormulaContent(chip, formula, result, isError) {
     const lhs = toLatex(formula);
     const sub = toLatexSubstituted(formula, vars, varUnits);
     const parts = formulaDisplayParts(formula, result, outputUnit);
+    if (parts.unknownUnit) {
+      chip.textContent = '';
+      const sp = document.createElement('span');
+      sp.style.cssText = 'font-style:italic;color:var(--rubine)';
+      sp.textContent = `unknown unit [${parts.unknownUnit}]`;
+      chip.appendChild(sp);
+      chip.className = 'formula-chip error';
+      chip.title = `[${parts.unknownUnit}] is not a unit CalcPad knows`;
+      return;
+    }
     if (parts.mismatch) {
       chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">unit mismatch: result is [${parts.mismatch}] not [${outputUnit}]</span>`;
       chip.className = 'formula-chip error';
@@ -3720,22 +3737,41 @@ function attachImageHandlers(wrap) {
   const img = wrap.querySelector('img');
   const handle = wrap.querySelector('.img-resize-handle');
   const label = wrap.querySelector('.img-size-label');
-  img.addEventListener('mousedown', e => { e.preventDefault(); selectImage(wrap); });
-  handle.addEventListener('mousedown', e => {
+  // Pointer events, not mouse events: the handle was unusable on a tablet,
+  // where nothing ever fires mousedown during a drag. Pointer capture keeps the
+  // drag alive if the finger strays outside the handle.
+  img.addEventListener('pointerdown', e => { e.preventDefault(); selectImage(wrap); });
+  handle.addEventListener('pointerdown', e => {
     e.preventDefault(); e.stopPropagation(); selectImage(wrap);
     wrap.classList.add('resizing');
     const startX = e.clientX, startW = img.getBoundingClientRect().width;
     const maxW = (getActiveEditor() || document.getElementById('editor')).getBoundingClientRect().width - 30;
-    const onMove = e => {
-      const newW = Math.round(Math.max(40, Math.min(maxW, startW + e.clientX - startX)));
+    try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+    const onMove = ev => {
+      const newW = Math.round(Math.max(40, Math.min(maxW, startW + ev.clientX - startX)));
       img.style.width = newW + 'px'; img.style.height = 'auto';
       label.textContent = newW + ' × ' + Math.round(img.getBoundingClientRect().height) + ' px';
     };
-    const onUp = () => { wrap.classList.remove('resizing'); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
-    document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+    const onUp = () => {
+      wrap.classList.remove('resizing');
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      handle.removeEventListener('pointercancel', onUp);
+      try { handle.releasePointerCapture(e.pointerId); } catch (err) {}
+      isDirty = true; autoSave(); // a resize is an edit like any other
+    };
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+    handle.addEventListener('pointercancel', onUp);
   });
 }
 document.addEventListener('mousedown', e => { if (!e.target.closest('.calc-img-wrap')) deselectAllImages(); });
+// Typing means the user has moved on from the image. Without this the image
+// stayed selected while text was entered, and the next Backspace deleted the
+// image instead of the character just typed.
+document.addEventListener('input', e => {
+  if (selectedImg && e.target && e.target.closest && e.target.closest('.calc-area')) deselectAllImages();
+});
 document.addEventListener('keydown', e => {
   if (selectedImg && (e.key === 'Delete' || e.key === 'Backspace')) {
     let active = document.activeElement;
@@ -4589,9 +4625,27 @@ function applyTextColour(c, fromInput) {
   document.getElementById('textColourSwatch').style.background = c;
   if (!fromInput) document.getElementById('textColourPanel').classList.remove('open');
 }
+// Clear only the background of whatever the selection touches. removeFormat
+// was stripping every inline style, so picking "no highlight" also wiped bold,
+// italics and text colour.
+function clearHighlightInSelection() {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return;
+  const range = sel.getRangeAt(0);
+  const host = getActiveEditor();
+  if (!host) return;
+  host.querySelectorAll('*').forEach(el => {
+    if (!range.intersectsNode(el)) return;
+    if (el.style && el.style.backgroundColor) el.style.backgroundColor = '';
+    if (el.hasAttribute && el.hasAttribute('bgcolor')) el.removeAttribute('bgcolor');
+  });
+}
 function applyHighlight(c, fromInput) {
   const ed = getActiveEditor(); if (ed) ed.focus();
-  if (c === 'transparent' || c === 'none') document.execCommand('removeFormat', false, null);
+  if (c === 'transparent' || c === 'none') {
+    document.execCommand('hiliteColor', false, 'transparent');
+    clearHighlightInSelection();
+  }
   else document.execCommand('hiliteColor', false, c);
   document.getElementById('hlColourSwatch').style.background = c === 'transparent' ? 'repeating-linear-gradient(45deg,#ddd,#ddd 2px,#fff 2px,#fff 6px)' : c;
   if (!fromInput) document.getElementById('hlColourPanel').classList.remove('open');
@@ -4602,7 +4656,9 @@ function applyFontSize(size) {
   const sel = window.getSelection();
   if (!sel.rangeCount || sel.isCollapsed) return;
   document.execCommand('fontSize', false, '7');
-  document.querySelectorAll('font[size="7"]').forEach(el => {
+  // Scoped to the editor being edited: a document-wide query also rewrote any
+  // <font size=7> sitting on another page.
+  (ed || document).querySelectorAll('font[size="7"]').forEach(el => {
     const span = document.createElement('span'); span.style.fontSize = size;
     span.innerHTML = el.innerHTML; el.replaceWith(span);
   });
@@ -4840,12 +4896,38 @@ async function exportWord() {
       // Export display values (converted units), not raw KaTeX text / SI internals.
       if(node.classList&&node.classList.contains('formula-chip')){const t=formulaChipExportText(node);if(t)runs.push(new TextRun({text:t,italics:true,...fmt}));return;}
       if(node.classList&&node.classList.contains('var-def-chip')){const t=varChipExportText(node);if(t)runs.push(new TextRun({text:t,italics:true,...fmt}));return;}
+      // Images produced no runs at all, so every one was dropped from the export.
+      if(tag==='img'||(node.classList&&node.classList.contains('calc-img-wrap'))){
+        const im = tag==='img' ? node : node.querySelector('img');
+        const m = im && /^data:image\/(png|jpe?g|gif|bmp)/i.exec(im.src||'');
+        if(m){
+          try{
+            const bin=atob(String(im.src).split(',')[1]);
+            const bytes=new Uint8Array(bin.length);
+            for(let k=0;k<bin.length;k++)bytes[k]=bin.charCodeAt(k);
+            const r=im.getBoundingClientRect();
+            runs.push(new ImageRun({data:bytes,
+              transformation:{width:Math.round(r.width)||300,height:Math.round(r.height)||200}}));
+          }catch(e){/* unreadable image — skip rather than fail the export */}
+        }
+        return;
+      }
       for(const c of node.childNodes)walk(c,nf);
     } walk(el,{}); return runs;
   }
   function convertNode(node) {
+    // Text sitting directly in the editor — which the opening line of a document
+    // usually is — was skipped entirely, so it never reached the exported file.
+    if(node.nodeType===Node.TEXT_NODE){
+      const t=node.textContent;
+      return t && t.trim() ? new Paragraph({children:[new TextRun({text:t})]}) : null;
+    }
     if(node.nodeType!==Node.ELEMENT_NODE)return null;
     let tag=node.tagName.toLowerCase();
+    // A chip or image at the editor root is its own paragraph.
+    if(node.classList&&(node.classList.contains('formula-chip')||node.classList.contains('var-def-chip')||node.classList.contains('calc-img-wrap'))){
+      const runs=getRuns(node); return runs.length?new Paragraph({children:runs}):null;
+    }
     if(tag==='h1')return new Paragraph({heading:HeadingLevel.HEADING_1,children:getRuns(node)});
     if(tag==='h2')return new Paragraph({heading:HeadingLevel.HEADING_2,children:getRuns(node)});
     if(tag==='h3')return new Paragraph({heading:HeadingLevel.HEADING_3,children:getRuns(node)});
