@@ -266,7 +266,18 @@ body{
 .chip-flash{outline:2px solid var(--rubine);outline-offset:1px;border-radius:2px}
 /* A second definition of a name already in use — the first one stays in effect */
 .var-def-chip.dup-name{outline:1px dashed var(--rubine);outline-offset:2px;border-radius:2px;opacity:.75}
-@media print{.var-def-chip.dup-name{outline:none;opacity:1}}
+.calc-table td.dup-name,.calc-table th.dup-name{outline:1px dashed var(--rubine);outline-offset:-2px}
+@media print{.var-def-chip.dup-name,.calc-table td.dup-name,.calc-table th.dup-name{outline:none;opacity:1}}
+/* Autosave failure notice — browser storage is finite and mostly filled by images */
+#saveWarn{display:none;position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:9500;
+  background:#fff;border-top:3px solid var(--rubine);box-shadow:0 4px 20px rgba(0,0,0,.25);
+  padding:10px 14px;border-radius:4px;font-family:Arial,sans-serif;font-size:12px;color:var(--dark);
+  max-width:min(560px,92vw)}
+#saveWarn.show{display:block}
+#saveWarn b{color:var(--rubine)}
+#saveWarn button{margin-left:10px;padding:3px 10px;border:1px solid #ddd;background:#fff;
+  border-radius:3px;cursor:pointer;font-size:11px;font-family:Arial,sans-serif}
+@media print{#saveWarn{display:none!important}}
 .flhs{flex-shrink:0}
 /* inline-flex so these still sit on one line inside the inline-block chip */
 .fseg-right{display:inline-flex;flex-wrap:wrap;align-items:baseline;min-width:0}
@@ -690,6 +701,15 @@ body{
 
 </div><!-- /pageStack -->
 
+<!-- Shown when the browser refuses to autosave, usually because embedded images
+     have filled its storage. Saving to a file is unaffected. -->
+<div id="saveWarn">
+  <b>Autosave has stopped</b> — this document is too large for browser storage
+  (embedded images are the usual cause). Your work is safe on screen, but it will
+  not survive a reload. Use <strong>File ▸ Save as</strong> to keep it.
+  <button onclick="document.getElementById('saveWarn').classList.remove('show')">Dismiss</button>
+</div>
+
 <!-- Print warning -->
 <div id="printWarning" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);
   z-index:9999;align-items:center;justify-content:center;font-family:Arial,sans-serif;">
@@ -735,7 +755,8 @@ const UNIT_PREF_GROUPS = [
 // Defaults are SI, except moments: a bare "N·m" result is almost never what a
 // structural calc wants, so the Moment group starts at kN·m. Saved documents
 // keep whatever they stored, since loading merges over these.
-let preferredUnits = { m: 'm', N: 'N', kg: 'kg', Pa: 'Pa', 'N·m': 'kN·m', s: 's', rad: 'rad' };
+const DEFAULT_PREFERRED_UNITS = { m: 'm', N: 'N', kg: 'kg', Pa: 'Pa', 'N·m': 'kN·m', s: 's', rad: 'rad' };
+let preferredUnits = { ...DEFAULT_PREFERRED_UNITS };
 
 // Footer "updated" date — the date the tool itself was last updated (build date),
 // shown as DD.MM.YY. Bump this whenever the app code changes.
@@ -2390,55 +2411,27 @@ function buildMirrorHeader(pageIdx) {
   return hdr;
 }
 
-// Call this whenever page 1 meta fields change to keep mirrors in sync
+// Call this whenever page 1 meta fields change to keep mirrors in sync.
+// The sheet number comes from the page's position in the document, which
+// renumberPages keeps in step with its id.
 function updateMirrorHeaders() {
-  function v(id) {
-    const el = document.getElementById(id);
-    return el ? el.value : '';
-  }
-
   document.querySelectorAll('[data-mirror-header]').forEach(hdr => {
     const page = hdr.closest('.a4-page');
     if (!page) return;
-    const pageIdx = parseInt(page.id.replace('page',''));
-    const pageNum = pageIdx + 1;
-
-    const cells = hdr.querySelectorAll('.mc:not(.mc.span2 + .mc)');
-    // Easier: rebuild the meta grid values directly
+    const pageIdx = parseInt(page.id.replace('page', ''), 10);
+    if (isNaN(pageIdx)) return;
     const meta = hdr.querySelector('.meta');
     if (!meta) return;
-    const allCells = Array.from(meta.querySelectorAll('.mc'));
-
-    // Map cell index to value
-    const vals = [
-      '', v('m-project'), 'Project no:', v('m-projno'),
-      'Date:', v('m-date'),
-      '', v('m-desc'), 'Sheet:', String(pageNum),
-      'Originator:', v('m-orig'),
-      '', v('m-deliv'), 'Checked:', v('m-checked'),
-      'Suitability:', v('m-suit'),
-      '', '', 'Revision:', v('m-rev')
-    ];
-
-    // Only update value cells (even indices are labels, odd are values)
-    // Actually update all non-label cells
-    const valueIndices = [1,3,5,7,9,11,13,15,17,19,21]; // positions of value cells
-    valueIndices.forEach(i => {
-      if (allCells[i] && !allCells[i].dataset.sheetCell) {
-        // find the corresponding source
-      }
-    });
-
-    // Simpler: just update every cell that has a data-src attribute
-    // or rebuild from scratch
     const newMeta = buildMirrorHeader(pageIdx).querySelector('.meta');
     if (newMeta) meta.replaceWith(newMeta);
   });
 }
 
 // Listen for changes to page 1 meta fields
+// Header edits are part of the document: without marking them they were never
+// autosaved, so a project name typed and then reloaded was simply lost.
 document.querySelectorAll('.mc input').forEach(inp => {
-  inp.addEventListener('input', updateMirrorHeaders);
+  inp.addEventListener('input', () => { updateMirrorHeaders(); isDirty = true; autoSave(); });
 });
 
 function addPage() {
@@ -2508,7 +2501,35 @@ function addPage() {
   // Attach overflow monitoring
   attachOverflowMonitor(newEdEl, cont);
   attachTableHandlersToArea(newEdEl);
+  renumberPages(); // ids stay positional, never handed out from a counter
   return newEdEl;
+}
+
+// Page identity is positional. Every id used to be handed out from a counter
+// that only ever went up, so deleting a page in the middle left gaps and the
+// next page created reused a live id — two elements answering to "editor2",
+// with getElementById reaching only the first. Reflow then could not find the
+// page below it, content stopped flowing, and duplicates piled up. Renumbering
+// after any structural change keeps ids, sheet numbers and pageCount in step.
+function renumberPages() {
+  const wraps = Array.from(document.querySelectorAll('.page-wrap'));
+  wraps.forEach((wrap, i) => {
+    wrap.id = 'pageWrap' + i;
+    const page = wrap.querySelector('.a4-page');   if (page) page.id = 'page' + i;
+    const cont = wrap.querySelector('.pg-content'); if (cont) cont.id = 'content' + i;
+    // Page 1's editor keeps the bare id the rest of the code derives index 0 from.
+    const ed = wrap.querySelector('.calc-area');   if (ed) ed.id = i === 0 ? 'editor' : 'editor' + i;
+  });
+  pageCount = Math.max(1, wraps.length);
+  reflowDebounce.clear(); // keys were the old ids
+  updateMirrorHeaders();  // sheet numbers follow position
+}
+
+// Drop every page after the first. Removing by id walked a counter that no
+// longer matched reality, so File ▸ New and Open could leave a page behind.
+function removeExtraPages() {
+  Array.from(document.querySelectorAll('.page-wrap')).slice(1).forEach(w => w.remove());
+  renumberPages();
 }
 
 function deletePage(wrap) {
@@ -2521,7 +2542,7 @@ function deletePage(wrap) {
     while (edEl.firstChild) prevEd.appendChild(edEl.firstChild);
   }
   wrap.remove();
-  pageCount = Math.max(1, pageCount - 1);
+  renumberPages();
   rebuildVars();
 }
 
@@ -2539,12 +2560,22 @@ function initPage1Height() {
 
 const reflowDebounce = new Map();
 let _rebuildActive = false; // suppresses MutationObserver-triggered reflow during rebuildVars
+// Reflow moves nodes between pages, and pullBackFromNext appends a node purely
+// to measure it and puts it back when it does not fit. Those mutations are the
+// observer's own doing, not the user's: left unguarded they schedule another
+// reflow, which trials again, and the pair never settles. Reflow re-schedules
+// itself explicitly where it needs to, so nothing is lost by ignoring them.
+let _reflowActive = false;
+function withReflowGuard(fn) {
+  _reflowActive = true;
+  try { return fn(); } finally { setTimeout(() => { _reflowActive = false; }, 0); }
+}
 let _rebuildPromoted = false; // a failed definition started working during this pass
 let _rebuildDepth = 0;        // bounds the re-run those promotions trigger
 
 function attachOverflowMonitor(edEl, contEl) {
   // Only suppress mutation-driven reflow during programmatic chip updates, not user typing
-  const moHandler = () => { if (!_rebuildActive) scheduleReflow(edEl, contEl); };
+  const moHandler = () => { if (!_rebuildActive && !_reflowActive) scheduleReflow(edEl, contEl); };
   const inputHandler = () => scheduleReflow(edEl, contEl);
   const mo = new MutationObserver(moHandler);
   mo.observe(edEl, { childList:true, subtree:true, characterData:true });
@@ -2630,7 +2661,8 @@ function splitNodeAtHeight(node, maxH, edTop) {
 
 // Pull content back from the next page when the current page has room.
 // Called by reflow() when scrollHeight <= maxH.
-function pullBackFromNext(edEl, contEl) {
+function pullBackFromNext(edEl, contEl) { return withReflowGuard(() => _pullBackFromNext(edEl, contEl)); }
+function _pullBackFromNext(edEl, contEl) {
   let rawId = edEl.id.replace('editor', '');
   const edIdx = rawId === '' ? 0 : parseInt(rawId);
   const nextEdEl = document.getElementById('editor' + (edIdx + 1));
@@ -2694,10 +2726,7 @@ function pullBackFromNext(edEl, contEl) {
 
   if (nextIsEmpty) {
     const nextWrap = nextEdEl.closest('.page-wrap');
-    if (nextWrap) {
-      nextWrap.remove();
-      pageCount = Math.max(1, pageCount - 1);
-    }
+    if (nextWrap) { nextWrap.remove(); renumberPages(); }
   } else if (pulled) {
     // Next page still has content — cascade: it may now have room to pull from its
     // own next page, or it may have overflow that needs pushing.
@@ -2707,7 +2736,8 @@ function pullBackFromNext(edEl, contEl) {
   if (pulled) rebuildVars();
 }
 
-function reflow(edEl, contEl) {
+function reflow(edEl, contEl) { return withReflowGuard(() => _reflow(edEl, contEl)); }
+function _reflow(edEl, contEl) {
   // Don't reflow while a formula/variable is being entered or edited. Editing a chip
   // temporarily expands it from compact KaTeX into longer raw text (=formula [unit]),
   // which can briefly overflow the page; reflowing then would split the page and yank
@@ -2733,6 +2763,14 @@ function reflow(edEl, contEl) {
     pullBackFromNext(edEl, contEl); // absorb content from the next page if there is room
     return;
   }
+
+  // Node positions are measured from the editor's border-box top, but scrollHeight
+  // also counts its padding. Comparing the two directly let the split sit a
+  // padding's worth too low, so a page kept ~10px of content past its own bottom —
+  // enough to shave the last line — and reflow could never resolve it, because
+  // the node scan found nothing crossing the line while the box was still over.
+  const padBottom = parseFloat(getComputedStyle(edEl).paddingBottom) || 0;
+  const splitH = maxH - padBottom;
 
   // Find the page index for this editor
   let rawId = edEl.id.replace('editor', '');
@@ -2763,8 +2801,8 @@ function reflow(edEl, contEl) {
   for (let i = 0; i < children.length; i++) {
     const edges = nodeEdges(children[i], edTop);
     if (!edges) continue;
-    if (edges.bottom > maxH) {
-      if (edges.top < maxH - 2) tailNode = splitNodeAtHeight(children[i], maxH, edTop);
+    if (edges.bottom > splitH) {
+      if (edges.top < splitH - 2) tailNode = splitNodeAtHeight(children[i], splitH, edTop);
       splitIndex = i;
       break;
     }
@@ -2798,6 +2836,14 @@ function reflow(edEl, contEl) {
     } catch(e) {}
   }
 
+  // Re-check this page as well as the next one. Only one overflowing node is
+  // moved per pass, so a page that gained several pages' worth of content at
+  // once — opening a file, pasting a long section — needs more than one. The
+  // MutationObserver cannot stand in for this: rebuildVars() below suppresses
+  // it for 200ms, which is exactly the window these mutations land in. This
+  // terminates because the check at the top returns as soon as the page fits,
+  // and the paths that move nothing return before reaching here.
+  scheduleReflow(edEl, contEl);
   scheduleReflow(nextEdEl, nextContEl);
   rebuildVars();
 }
@@ -2821,10 +2867,21 @@ requestAnimationFrame(() => {
 // ── Auto-save to localStorage ─────────────────────────────────
 const LS_KEY = 'calcpad_autosave';
 let _autoSaveTimer = null;
+// A silent catch here meant that once the document outgrew browser storage —
+// a couple of photos will do it — autosave stopped for good with no sign of it.
+let _saveWarned = false;
 function autoSave() {
   clearTimeout(_autoSaveTimer);
   _autoSaveTimer = setTimeout(() => {
-    try { localStorage.setItem(LS_KEY, buildSaveData()); } catch(e) {}
+    try {
+      localStorage.setItem(LS_KEY, buildSaveData());
+      if (_saveWarned) { _saveWarned = false; const el = document.getElementById('saveWarn'); if (el) el.classList.remove('show'); }
+    } catch(e) {
+      if (_saveWarned) return;
+      _saveWarned = true;
+      const el = document.getElementById('saveWarn');
+      if (el) el.classList.add('show');
+    }
   }, 500);
 }
 function reattachImageHandlers() {
@@ -2848,11 +2905,11 @@ function loadFromLocalStorage() {
     if (!raw) return;
     const data = JSON.parse(raw);
     const pages = data.pages || [data.content || ''];
-    for (let i = pageCount - 1; i >= 1; i--) { const w = document.getElementById('pageWrap'+i); if(w)w.remove(); }
-    pageCount = 1;
+    removeExtraPages();
     setEditorHtml(document.getElementById('editor'), pages[0]);
     for (let i = 1; i < pages.length; i++) { const newEd = addPage(); setEditorHtml(newEd, pages[i]); }
-    if (data.preferredUnits) { Object.assign(preferredUnits, data.preferredUnits); syncUnitPrefPanel(); }
+    preferredUnits = { ...DEFAULT_PREFERRED_UNITS, ...(data.preferredUnits || {}) };
+    syncUnitPrefPanel();
     restoreMeta(data.meta || {});
     updateMirrorHeaders();
     reattachImageHandlers();
@@ -2951,7 +3008,7 @@ function rebuildVars() {
   const seenNames = new Set();
   getAllEditors().forEach(ed => {
     Array.from(ed.querySelectorAll('.var-def-chip, .formula-chip, .calc-table')).forEach(chip => {
-      if (chip.classList.contains('calc-table')) { injectNamedCells(chip); return; }
+      if (chip.classList.contains('calc-table')) { injectNamedCells(chip, seenNames); return; }
       if (chip.classList.contains('var-def-chip')) {
         const name = chip.dataset.varName;
         const expr = chip.dataset.varExpr;
@@ -3140,7 +3197,7 @@ document.addEventListener('keydown', e => {
       e.preventDefault();
       const prevEd = prevWrap.querySelector('.calc-area');
       wrap.remove();
-      pageCount = Math.max(1, pageCount - 1);
+      renumberPages();
       if (prevEd) {
         prevEd.focus();
         setActiveEditor(prevEd);
@@ -4453,10 +4510,23 @@ document.addEventListener('keydown', e => {
 });
 // Pull every named cell in a table into the document variable pool (SI base value
 // + SI unit), so formula chips can reference them like any other variable.
-function injectNamedCells(table) {
+// seenNames carries the names already claimed earlier in the document, so a
+// named cell takes part in duplicate detection like any chip. It used to write
+// straight into vars, letting a cell silently replace a variable of the same
+// name with no warning anywhere.
+function injectNamedCells(table, seenNames) {
   table.querySelectorAll('[data-varname]').forEach(cell => {
     const name = cell.dataset.varname;
     if (!name) return;
+    if (seenNames && seenNames.has(name)) {
+      cell.classList.add('dup-name');
+      cell.title = `"${name}" is already defined earlier — rename this cell. ` +
+                   `The first definition is the one in use.`;
+      return;
+    }
+    if (seenNames) seenNames.add(name);
+    cell.classList.remove('dup-name');
+    if (cell.title && /already defined/.test(cell.title)) cell.removeAttribute('title');
     let num, autoUnit;
     if (cell.dataset.formula) {
       num = parseFloat(cell.dataset.value);
@@ -4546,11 +4616,16 @@ function toggleFileMenu() { document.getElementById('fileDropdown').classList.to
 function closeFileMenu() { document.getElementById('fileDropdown').classList.remove('open'); }
 document.addEventListener('mousedown', e => { if (!e.target.closest('#fileMenuWrap')) closeFileMenu(); });
 
+const META_IDS = ['m-project','m-projno','m-date','m-desc','m-sheet','m-orig','m-deliv','m-checked','m-suit','m-rev'];
 function collectMeta() {
-  const ids = ['m-project','m-projno','m-date','m-desc','m-sheet','m-orig','m-deliv','m-checked','m-suit','m-rev'];
-  const out = {}; ids.forEach(id => { const el = document.getElementById(id); out[id] = el ? el.value : ''; }); return out;
+  const out = {}; META_IDS.forEach(id => { const el = document.getElementById(id); out[id] = el ? el.value : ''; }); return out;
 }
-function restoreMeta(meta) { Object.entries(meta).forEach(([id,val]) => { const el=document.getElementById(id); if(el)el.value=val; }); }
+// Every field is written, not just the ones present: iterating the supplied
+// object meant restoreMeta({}) cleared nothing, so File \u25b8 New kept the previous
+// project name and description, and opening a file left stale fields behind.
+function restoreMeta(meta) {
+  META_IDS.forEach(id => { const el = document.getElementById(id); if (el) el.value = (meta && meta[id]) || ''; });
+}
 
 function buildSaveData() {
   const pages = [];
@@ -4620,13 +4695,9 @@ function fileNew() {
   closeFileMenu();
   if (isDirty && !confirm('Unsaved changes will be lost. Continue?')) return;
   getAllEditors().forEach(ed => { ed.innerHTML = ''; });
-  // Remove extra pages
-  for (let i = pageCount - 1; i >= 1; i--) {
-    const w = document.getElementById('pageWrap' + i);
-    if (w) w.remove();
-  }
-  pageCount = 1;
+  removeExtraPages();
   restoreMeta({}); document.getElementById('m-date').value = new Date().toLocaleDateString('en-GB');
+  preferredUnits = { ...DEFAULT_PREFERRED_UNITS }; syncUnitPrefPanel();
   currentFileName = 'Untitled'; isDirty = false; document.title = 'Untitled — CalcPad';
   try { localStorage.removeItem(LS_KEY); } catch(e) {}
   rebuildVars();
@@ -4646,9 +4717,7 @@ function loadFile(input) {
   reader.onload = e => {
     try {
       const data = JSON.parse(e.target.result);
-      // Remove extra pages first
-      for (let i = pageCount - 1; i >= 1; i--) { const w = document.getElementById('pageWrap'+i); if(w)w.remove(); }
-      pageCount = 1;
+      removeExtraPages();
       const pages = data.pages || [data.content || ''];
       // Set page 1 content
       setEditorHtml(document.getElementById('editor'), pages[0]);
@@ -4657,7 +4726,10 @@ function loadFile(input) {
         const newEd = addPage();
         setEditorHtml(newEd, pages[i]);
       }
-      if (data.preferredUnits) { Object.assign(preferredUnits, data.preferredUnits); syncUnitPrefPanel(); }
+      // Replace, not merge: merging let the previous document's choices leak
+      // into the one being opened.
+      preferredUnits = { ...DEFAULT_PREFERRED_UNITS, ...(data.preferredUnits || {}) };
+      syncUnitPrefPanel();
       restoreMeta(data.meta || {});
       updateMirrorHeaders();
       currentFileName = file.name.replace(/\.perega$/, '');
