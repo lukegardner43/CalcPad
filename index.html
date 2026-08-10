@@ -4,9 +4,21 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CalcPad</title>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
+<!-- KaTeX 0.16.47. Served from jsDelivr rather than cdnjs so the files are the
+     npm package byte for byte, which is what the integrity hashes below were
+     computed from. 0.16.9 was three years old and carried five published
+     advisories; this is a drop-in patch on the same minor line.
+     integrity + crossorigin mean a tampered CDN response is refused rather than
+     executed. defer keeps the 271 KB off the parsing path — the bootstrap at the
+     end of the page waits for DOMContentLoaded, by which time this has run. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.47/dist/katex.min.css"
+      integrity="sha384-nH0MfJ44wi1dd7w6jinlyBgljjS8EJAh2JBoRad8a3VDw2K69vfaaqm4WnR+gXtA"
+      crossorigin="anonymous">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.47/dist/katex.min.js"
+        integrity="sha384-CwjPRVHTvLiMBFjEoij+QZViMV5rhTOIp7CJzl24JEqpRDA1sJFHVXXLURktbYYp"
+        crossorigin="anonymous"></script>
+<!-- docx is NOT loaded here. It is 742 KB and only needed when someone exports to
+     Word, so loadDocx() fetches it on demand — see exportWord(). -->
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -2726,6 +2738,18 @@ function autoSave() {
 function reattachImageHandlers() {
   document.querySelectorAll('.calc-img-wrap').forEach(wrap => attachImageHandlers(wrap));
 }
+
+// Put saved page HTML into an editor. A saved document is untrusted input — a
+// .perega someone sends you (or a tampered autosave) could carry markup such as
+// <img src=x onerror="..."> which runs the moment it is assigned to innerHTML.
+// Route it through the same sanitiser the paste path already uses, which strips
+// scripts, event handlers and javascript: URLs while leaving chips, tables and
+// embedded images untouched.
+function setEditorHtml(ed, html) {
+  ed.textContent = '';
+  ed.appendChild(sanitisePastedChunk(String(html == null ? '' : html)));
+}
+
 function loadFromLocalStorage() {
   try {
     const raw = localStorage.getItem(LS_KEY);
@@ -2734,8 +2758,8 @@ function loadFromLocalStorage() {
     const pages = data.pages || [data.content || ''];
     for (let i = pageCount - 1; i >= 1; i--) { const w = document.getElementById('pageWrap'+i); if(w)w.remove(); }
     pageCount = 1;
-    document.getElementById('editor').innerHTML = pages[0] || '';
-    for (let i = 1; i < pages.length; i++) { const newEd = addPage(); newEd.innerHTML = pages[i] || ''; }
+    setEditorHtml(document.getElementById('editor'), pages[0]);
+    for (let i = 1; i < pages.length; i++) { const newEd = addPage(); setEditorHtml(newEd, pages[i]); }
     if (data.preferredUnits) { Object.assign(preferredUnits, data.preferredUnits); syncUnitPrefPanel(); }
     restoreMeta(data.meta || {});
     updateMirrorHeaders();
@@ -4535,11 +4559,11 @@ function loadFile(input) {
       pageCount = 1;
       const pages = data.pages || [data.content || ''];
       // Set page 1 content
-      document.getElementById('editor').innerHTML = pages[0] || '';
+      setEditorHtml(document.getElementById('editor'), pages[0]);
       // Add additional pages
       for (let i = 1; i < pages.length; i++) {
         const newEd = addPage();
-        newEd.innerHTML = pages[i] || '';
+        setEditorHtml(newEd, pages[i]);
       }
       if (data.preferredUnits) { Object.assign(preferredUnits, data.preferredUnits); syncUnitPrefPanel(); }
       restoreMeta(data.meta || {});
@@ -4609,8 +4633,32 @@ function varChipExportText(chip) {
   return expr ? `${name} = ${expr} = ${rhs}` : `${name} = ${rhs}`;
 }
 
+// The Word export library is 742 KB and most sessions never export, so it is
+// fetched the first time it is needed instead of on every page load. Same
+// integrity/crossorigin guarantee as a static tag; concurrent calls share one
+// request, and a failure clears the promise so a later attempt can retry.
+const DOCX_URL = 'https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js';
+const DOCX_SRI = 'sha384-4xaIisuLEy2lo2HkB2C4rEf7v8jbTb2kuogX6TkuEt9feTWKBSFSOzsqNNbV+sKh';
+let _docxPromise = null;
+function loadDocx() {
+  if (typeof docx !== 'undefined') return Promise.resolve();
+  if (_docxPromise) return _docxPromise;
+  _docxPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = DOCX_URL;
+    s.integrity = DOCX_SRI;
+    s.crossOrigin = 'anonymous';
+    s.onload = () => (typeof docx === 'undefined' ? reject(new Error('loaded but unavailable')) : resolve());
+    s.onerror = () => { _docxPromise = null; reject(new Error('could not be downloaded')); };
+    document.head.appendChild(s);
+  });
+  return _docxPromise;
+}
+
 async function exportWord() {
   closeFileMenu();
+  try { await loadDocx(); }
+  catch (e) { alert('Word export needs to download a component and it ' + e.message + '.\nCheck your connection and try again.'); return; }
   if (typeof docx === 'undefined') { alert('Word export library not loaded.'); return; }
   const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
           HeadingLevel, AlignmentType, BorderStyle, WidthType, ShadingType, ImageRun, LevelFormat } = docx;
@@ -4687,10 +4735,17 @@ function triggerPrint() {
 
 // ── Bootstrap ──────────────────────────────────────────────────
 // Restore autosaved content last, once every binding above is initialised
-// (see the note next to buildUnitPrefPanel()).
-loadFromLocalStorage();
-rebuildVars();
-refreshAllTables();
+// (see the note next to buildUnitPrefPanel()). Deferred on DOMContentLoaded so
+// the deferred KaTeX has executed by now — otherwise the first render of every
+// chip would fall back to plain text. Everything above only defines functions
+// and attaches listeners, so none of it needs KaTeX at parse time.
+function bootstrap() {
+  loadFromLocalStorage();
+  rebuildVars();
+  refreshAllTables();
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootstrap);
+else bootstrap();
 </script>
 </body>
 </html>
