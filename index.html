@@ -3275,73 +3275,43 @@ document.addEventListener('keydown', e => {
     if (node.nodeType !== Node.TEXT_NODE) return;
     if (!ed.contains(node)) return;
     const fullText = node.textContent.trim();
-    // Try plain  "varName = expr"  first, then  "description text varName = expr"
-    const m = fullText.match(VAR_RE) || fullText.match(VAR_DESC_RE);
-    if (m) {
-      // VAR_RE:      m[1]=name  m[2]=expr  (no prefix)
-      // VAR_DESC_RE: m[1]=prefix  m[2]=name  m[3]=expr
-      const isDesc = m.length === 4 && m[3] !== undefined;
-      const varName = isDesc ? m[2] : m[1];
-      let exprStr = (isDesc ? m[3] : m[2]).trim();
-      const prefix  = isDesc ? m[1] : '';
-      // Extract optional output display unit: "h + b [mm]" → exprStr="h + b", dispUnit="mm"
-      let dispUnit = '';
-      const dispUnitMatch = exprStr.match(/^(.*?)\s*\[([^\]]+)\]\s*$/);
-      if (dispUnitMatch && dispUnitMatch[1].trim()) { exprStr = dispUnitMatch[1].trim(); dispUnit = dispUnitMatch[2].trim(); }
-      let val, unit = '', siUnit = '';
-      // A plain "30 deg" style literal is a value — keep the unit the user typed
-      // so the chip reads "θ = 30 deg" rather than a converted SI number.
-      const lit = literalValueUnit(exprStr);
-      if (lit) {
-        unit = lit.unit; exprStr = lit.numStr;
-        const conv = applyUnitConversion(lit.val, unit);
-        if (conv) { val = conv.siVal; siUnit = conv.siUnitStr; }
-        else { val = lit.val; siUnit = unit; }
-        commitVarDefChecked(node, varName, val, exprStr, prefix, unit, siUnit, dispUnit, e);
-        return;
-      }
-      try {
-        val = parseFloat(evalFormula(exprStr, vars, varName).replace(/,/g, ''));
-        if (isNaN(val)) throw new Error('NaN');
-        // Deliberately no unit here. An expression's unit is re-derived from its
-        // operands on every render (rebuildVars/renderVarChipContent), so storing
-        // a snapshot of it on the chip only caused trouble: it was appended to the
-        // text when editing ("V = w*B N/m", which then fails to evaluate) and it
-        // bypassed the user's unit preferences in the sidebar. commitFormula has
-        // always left it unset; this path now matches.
-      } catch(err) {
-        const ue = extractValueAndUnit(exprStr);
-        if (!ue) {
-          // "name = expr" matched but the expression can't be evaluated (e.g. an
-          // undefined variable or a typo) and isn't a plain value+unit either.
-          // Don't drop the line silently — commit an error formula chip so the
-          // failure is visible, mirroring commitFormula()'s fallback. (Without this
-          // the typed text just sat there with no chip and no error.)
-          e.preventDefault();
-          let result, isError = false;
-          try { result = evalFormula(exprStr, vars, varName); }
-          catch(ex) { result = ex.message || 'Error'; isError = true; }
-          const parent = node.parentNode;
-          const frag = document.createDocumentFragment();
-          if (prefix) frag.appendChild(document.createTextNode(prefix));
-          frag.appendChild(makeVarErrorChip(varName, exprStr, result, isError, dispUnit));
-          const spacer = document.createTextNode(' ');
-          frag.appendChild(spacer);
-          parent.replaceChild(frag, node);
-          const r = document.createRange();
-          r.setStartAfter(spacer); r.collapse(true);
-          sel.removeAllRanges(); sel.addRange(r);
-          rebuildVars();
-          return;
-        }
-        const origNumStr = ue.numStr;
-        unit = ue.unit; exprStr = origNumStr;
-        const conv = applyUnitConversion(ue.val, unit);
-        if (conv) { val = conv.siVal; siUnit = conv.siUnitStr; }
-        else { val = ue.val; siUnit = unit; }
-      }
-      commitVarDefChecked(node, varName, val, exprStr, prefix, unit, siUnit, dispUnit, e);
+    // Several definitions separated by semicolons: "b = 200 mm; h = 400 mm".
+    // Only when every part is one, so prose containing a semicolon stays prose.
+    const segs = definitionSegments(fullText);
+    if (segs) {
+      // A clash anywhere in the line stops the whole line, so nothing is
+      // half-committed and the user can rename before pressing Enter again.
+      const names = segs.map(definitionName);
+      const repeated = names.some((n, i) => names.indexOf(n) !== i);
+      const dup = names.map(n => document.querySelector(`.var-def-chip[data-var-name="${CSS.escape(n)}"]`)).find(Boolean);
+      if (repeated || dup) { if (dup) flashExistingChip(dup); return; }
+      e.preventDefault();
+      commitDefinitionLine(node, segs);
+      return;
     }
+    // Try plain  "varName = expr"  first, then  "description text varName = expr"
+    const d = parseVarDefinition(fullText);
+    if (!d) return;
+    if (d.failed) {
+      // "name = expr" matched but the expression can't be evaluated (e.g. an
+      // undefined variable or a typo) and isn't a plain value+unit either.
+      // Don't drop the line silently — commit an error formula chip so the
+      // failure is visible, mirroring commitFormula()'s fallback. (Without this
+      // the typed text just sat there with no chip and no error.)
+      e.preventDefault();
+      const frag = document.createDocumentFragment();
+      if (d.prefix) frag.appendChild(document.createTextNode(d.prefix));
+      frag.appendChild(makeVarErrorChip(d.name, d.expr, d.result, d.isError, d.dispUnit));
+      const spacer = document.createTextNode('\u00A0');
+      frag.appendChild(spacer);
+      node.parentNode.replaceChild(frag, node);
+      const r = document.createRange();
+      r.setStartAfter(spacer); r.collapse(true);
+      sel.removeAllRanges(); sel.addRange(r);
+      rebuildVars();
+      return;
+    }
+    commitVarDefChecked(node, d.name, d.val, d.expr, d.prefix, d.unit, d.siUnit, d.dispUnit, e);
   }
 }, true);
 
@@ -3549,6 +3519,122 @@ function definitionEqIndex(text) {
   return -1;
 }
 
+// "b = 200 mm; h = 400 mm" → ["b = 200 mm", "h = 400 mm"]. Semicolons inside
+// brackets belong to the expression, so only top-level ones split.
+function splitTopLevelSemicolons(text) {
+  const parts = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+    else if (c === ';' && depth <= 0) { parts.push(text.slice(start, i).trim()); start = i + 1; }
+  }
+  parts.push(text.slice(start).trim());
+  return parts;
+}
+
+// The name "name = expr" (or "desc name = expr") defines, or null if the text
+// isn't a definition.
+function definitionName(text) {
+  const m = text.match(VAR_RE) || text.match(VAR_DESC_RE);
+  if (!m) return null;
+  return m.length === 4 && m[3] !== undefined ? m[2] : m[1];
+}
+
+// Splits a line into definitions only when every part is one, so an ordinary
+// sentence containing a semicolon is left as text. Returns null otherwise.
+function definitionSegments(text) {
+  const segs = splitTopLevelSemicolons(text);
+  if (segs.length < 2) return null;                            // no semicolon to split on
+  while (segs.length && !segs[segs.length - 1]) segs.pop();    // tolerate "b = 200 mm;"
+  // Empty leading parts are kept: editing the second chip of a committed line
+  // hands back "; h = 400 mm", and that semicolon has to survive the re-commit.
+  if (!segs.some(Boolean)) return null;
+  return segs.filter(Boolean).every(s => definitionName(s)) ? segs : null;
+}
+
+// Works out what "name = expr" evaluates to, using the same rules as the Enter
+// key: a plain "30 deg" keeps the unit as typed, anything else is evaluated
+// against the variables defined so far. Returns null when the text isn't a
+// definition, and {failed:true} when the name is fine but the expression isn't —
+// the caller shows that as an error chip rather than dropping the line.
+function parseVarDefinition(text) {
+  const m = text.match(VAR_RE) || text.match(VAR_DESC_RE);
+  if (!m) return null;
+  const isDesc = m.length === 4 && m[3] !== undefined;
+  const name = isDesc ? m[2] : m[1];
+  let expr = (isDesc ? m[3] : m[2]).trim();
+  const prefix = isDesc ? m[1] : '';
+  // Optional output display unit: "h + b [mm]" → expr="h + b", dispUnit="mm"
+  let dispUnit = '';
+  const dm = expr.match(/^(.*?)\s*\[([^\]]+)\]\s*$/);
+  if (dm && dm[1].trim()) { expr = dm[1].trim(); dispUnit = dm[2].trim(); }
+  let val, unit = '', siUnit = '';
+  const lit = literalValueUnit(expr);
+  if (lit) {
+    unit = lit.unit; expr = lit.numStr;
+    const conv = applyUnitConversion(lit.val, unit);
+    if (conv) { val = conv.siVal; siUnit = conv.siUnitStr; }
+    else { val = lit.val; siUnit = unit; }
+    return { name, val, expr, prefix, unit, siUnit, dispUnit };
+  }
+  try {
+    val = parseFloat(evalFormula(expr, vars, name).replace(/,/g, ''));
+    if (isNaN(val)) throw new Error('NaN');
+    // Deliberately no unit here. An expression's unit is re-derived from its
+    // operands on every render (rebuildVars/renderVarChipContent), so storing
+    // a snapshot of it on the chip only caused trouble: it was appended to the
+    // text when editing ("V = w*B N/m", which then fails to evaluate) and it
+    // bypassed the user's unit preferences in the sidebar.
+  } catch (err) {
+    const ue = extractValueAndUnit(expr);
+    if (!ue) {
+      let result, isError = false;
+      try { result = evalFormula(expr, vars, name); }
+      catch (ex) { result = ex.message || 'Error'; isError = true; }
+      return { name, expr, prefix, dispUnit, result, isError, failed: true };
+    }
+    unit = ue.unit; expr = ue.numStr;
+    const conv = applyUnitConversion(ue.val, unit);
+    if (conv) { val = conv.siVal; siUnit = conv.siUnitStr; }
+    else { val = ue.val; siUnit = unit; }
+  }
+  return { name, val, expr, prefix, unit, siUnit, dispUnit };
+}
+
+// Several definitions on one line. Committed left to right so a later part can
+// use an earlier one ("b = 200 mm; A = b*b"), with the semicolons kept between
+// the chips so the line still reads the way it was typed.
+function commitDefinitionLine(textNode, segs) {
+  _editingVarDef = false;
+  _editCommitPending = true; setTimeout(() => { _editCommitPending = false; }, 500);
+  const frag = document.createDocumentFragment();
+  segs.forEach((seg, i) => {
+    if (i) frag.appendChild(document.createTextNode('; '));
+    const d = parseVarDefinition(seg);
+    if (!d) { frag.appendChild(document.createTextNode(seg)); return; }
+    if (d.prefix) frag.appendChild(document.createTextNode(d.prefix));
+    if (d.failed) {
+      frag.appendChild(makeVarErrorChip(d.name, d.expr, d.result, d.isError, d.dispUnit));
+      return;
+    }
+    frag.appendChild(makeVarDefChip(d.name, d.val, d.expr, d.unit, d.siUnit, d.dispUnit));
+    // Keep the running value so the next part of the line can use it;
+    // rebuildVars() re-derives everything from the DOM straight after.
+    vars[d.name] = d.val;
+    if (d.siUnit) varUnits[d.name] = d.siUnit;
+  });
+  const spacer = document.createTextNode('\u00A0');
+  frag.appendChild(spacer);
+  textNode.parentNode.replaceChild(frag, textNode);
+  const r = document.createRange();
+  r.setStartAfter(spacer); r.collapse(true);
+  const sel = window.getSelection();
+  sel.removeAllRanges(); sel.addRange(r);
+  rebuildVars();
+}
+
 function commitFormula(ed) {
   const sel = window.getSelection();
   if (!sel.rangeCount) { cancelFormula(); return; }
@@ -3556,6 +3642,26 @@ function commitFormula(ed) {
   const node = range.startContainer;
   if (node.nodeType !== Node.TEXT_NODE) { cancelFormula(); return; }
   const text = node.textContent;
+  // Several definitions on one line: "b = 200 mm; h = 400 mm". Handled before the
+  // single-definition split below, which would otherwise take the first '=' and
+  // swallow the rest of the line into that one expression.
+  const segs = definitionSegments(text.trim());
+  if (segs) {
+    const names = segs.map(definitionName);
+    const repeated = names.some((n, i) => names.indexOf(n) !== i);
+    const dup = names.map(n => document.querySelector(`.var-def-chip[data-var-name="${CSS.escape(n)}"]`)).find(Boolean);
+    formulaBuffer = null;
+    // A clash anywhere in the line stops the whole line, so nothing is
+    // half-committed and the user can rename before pressing Enter again.
+    if (repeated || dup) {
+      if (dup) flashExistingChip(dup);
+      _editCommitPending = true; setTimeout(() => { _editCommitPending = false; }, 500);
+      document.execCommand('insertLineBreak');
+      return;
+    }
+    commitDefinitionLine(node, segs);
+    return;
+  }
   let eqIdx = definitionEqIndex(text);
   if (eqIdx === -1) { cancelFormula(); return; }
   let formula = text.slice(eqIdx + 1).trim();
@@ -3820,6 +3926,21 @@ function pasteLineToFragment(rawLine, wvars, wunits) {
   const trimmed = rawLine.trim();
   if (!trimmed) return frag; // blank line — the <br> between lines provides the break
 
+  // Semicolon-separated definitions on one pasted line, same as typing them.
+  const segs = definitionSegments(trimmed);
+  if (segs) {
+    segs.forEach((seg, n) => {
+      const sub = pasteLineToFragment(seg, wvars, wunits);
+      const last = sub.lastChild;
+      const more = n < segs.length - 1;
+      // Drop the sub-line's trailing spacer so the semicolon sits against the chip
+      if (more && last && last.nodeType === Node.TEXT_NODE && !last.textContent.trim()) sub.removeChild(last);
+      frag.appendChild(sub);
+      if (more) frag.appendChild(document.createTextNode('; '));
+    });
+    return frag;
+  }
+
   // Bare formula:  "= expr"  (leading '=', not '==')
   if (/^=(?!=)/.test(trimmed)) {
     let formula = trimmed.slice(1).trim();
@@ -3901,8 +4022,11 @@ function pastedTextNames(text) {
   text.split(/\r\n|\r|\n/).forEach(line => {
     const t = line.trim();
     if (!t || /^=(?!=)/.test(t)) return;
-    const m = t.match(VAR_RE) || t.match(VAR_DESC_RE);
-    if (m) names.push(m.length === 4 && m[3] !== undefined ? m[2] : m[1]);
+    // A line may define several names at once: "b = 200 mm; h = 400 mm"
+    (definitionSegments(t) || [t]).forEach(seg => {
+      const n = definitionName(seg);
+      if (n) names.push(n);
+    });
   });
   return names;
 }
@@ -4091,13 +4215,17 @@ function renamePastedText(text, map) {
     const t = line.trim();
     if (!t) return line;
     if (/^=(?!=)/.test(t)) return line.replace(t, sub(t));
-    const m = t.match(VAR_RE) || t.match(VAR_DESC_RE);
-    if (!m) return line;
-    const isDesc = m.length === 4 && m[3] !== undefined;
-    const name = isDesc ? m[2] : m[1];
-    const expr = isDesc ? m[3] : m[2];
-    const prefix = isDesc ? m[1] : '';
-    return line.replace(t, prefix + (map[name] || name) + ' = ' + sub(expr));
+    // One line may hold several definitions: rename each part separately.
+    const renamed = (definitionSegments(t) || [t]).map(seg => {
+      const m = seg.match(VAR_RE) || seg.match(VAR_DESC_RE);
+      if (!m) return seg;
+      const isDesc = m.length === 4 && m[3] !== undefined;
+      const name = isDesc ? m[2] : m[1];
+      const expr = isDesc ? m[3] : m[2];
+      const prefix = isDesc ? m[1] : '';
+      return prefix + (map[name] || name) + ' = ' + sub(expr);
+    }).join('; ');
+    return renamed === t ? line : line.replace(t, renamed);
   }).join('\n');
 }
 
