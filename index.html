@@ -1054,10 +1054,17 @@ function toJsExpr(raw, variables_, free) {
     const unitSymsSorted = Object.keys(UNIT_CONVERSIONS).sort((a,b) => b.length - a.length);
     const unitAltStr = unitSymsSorted.map(u => u.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
     // Negative lookbehind: don't match digits that are part of a variable name (e.g. F1kN).
-    const unitLitRe = new RegExp(`(?<![a-zA-Z0-9_])((?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][+-]?\\d+)?)\\s*(${unitAltStr})(?:\\s*\\^\\s*(-?\\d+))?(?![a-zA-Z0-9_])`, 'g');
+    // A run of symbols is one unit: "20kNm" is 20 kN·m, matching how the same
+    // unit is written in a [ ] display spec.
+    const unitLitRe = new RegExp(`(?<![a-zA-Z0-9_])((?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][+-]?\\d+)?)\\s*((?:${unitAltStr})+)(?:\\s*\\^\\s*(-?\\d+))?(?![a-zA-Z0-9_])`, 'g');
     expr = expr.replace(unitLitRe, (match, numStr, unit, exp) => {
       if (varNames.has(unit)) return match;
-      const factor = Math.pow(UNIT_CONVERSIONS[unit], exp === undefined ? 1 : parseInt(exp, 10));
+      const syms = splitUnitSymbols(unit);
+      if (!syms) return match;
+      // The exponent binds to the last symbol, so "2kNm^2" is 2 kN·m².
+      const e = exp === undefined ? 1 : parseInt(exp, 10);
+      let factor = 1;
+      syms.forEach((sym, i) => { factor *= Math.pow(UNIT_CONVERSIONS[sym], i === syms.length - 1 ? e : 1); });
       return '(' + (parseFloat(numStr) * factor) + ')';
     });
   }
@@ -1335,6 +1342,13 @@ function usedVars(formula) {
 }
 
 function unitToLatex(unit) {
+  // Rendered in the order written rather than reduced: a moment per metre width
+  // is kN·m/m, and cancelling it to kN throws away what the number means. Only
+  // done when every symbol is a real unit, so anything else falls through to the
+  // reduced form (and then to plain text) exactly as before.
+  const terms = unitTerms(unit);
+  if (terms.length && terms.every(([sym]) => UNIT_CONVERSIONS[sym] !== undefined))
+    return unitTermsToLatex(terms);
   const obj = parseUnitStr(unit);
   if (Object.keys(obj).length) return unitObjToLatex(obj);
   return '\\,\\text{' + unit.replace(/[{}\\^_]/g, '') + '}';
@@ -1364,22 +1378,56 @@ function literalValueUnit(exprStr) {
 }
 
 // ── Unit algebra helpers ───────────────────────────────────
-// Parse "m/s", "kN/m^2", "mm²" into {sym: exponent} map.
-function parseUnitStr(unitStr) {
-  if (!unitStr) return {};
+// Run-together unit symbols: "kNm" is kN·m, "Nmm" is N·mm. Engineering notation
+// leaves the multiplication sign out, so a moment is written kNm and a bending
+// moment per metre width kNm/m. Returns null when the text isn't a run of known
+// symbols, which keeps a genuinely unknown unit ("furlong") unknown rather than
+// picking it apart. Longest match first, with backtracking, so "min" stays
+// minutes and "mm" stays millimetres.
+function splitUnitSymbols(tok) {
+  const known = s => Object.prototype.hasOwnProperty.call(UNIT_CONVERSIONS, s);
+  if (known(tok)) return [tok];
+  const search = s => {
+    if (!s) return [];
+    for (let n = Math.min(3, s.length); n >= 1; n--) {   // no symbol is longer than "GPa"
+      if (!known(s.slice(0, n))) continue;
+      const rest = search(s.slice(n));
+      if (rest) return [s.slice(0, n), ...rest];
+    }
+    return null;
+  };
+  return search(tok);
+}
+// The terms of a unit string in the order written, without cancelling:
+// "kNm/m" gives [['kN',1],['m',1],['m',-1]]. An exponent binds to the last
+// symbol of a run, so "kNm2" is kN·m² and "mm2" is mm².
+function unitTerms(unitStr) {
+  if (!unitStr) return [];
   const s = unitStr.replace(/²/g,'^2').replace(/³/g,'^3').replace(/⁴/g,'^4').replace(/·/g,'*');
-  const result = {};
+  const terms = [];
   function addTerms(str, sign) {
     str.split('*').forEach(part => {
       const t = part.trim(); if (!t) return;
       // Negative exponents are allowed, so "m^-2" reads the same as "1/m^2".
       const m = t.match(/^([a-zA-Z]+)(?:\^?(-?\d+))?$/);
-      if (m) { const sym=m[1], exp=m[2]?parseInt(m[2],10):1; result[sym]=(result[sym]||0)+sign*exp; if(!result[sym])delete result[sym]; }
+      if (!m) return;
+      const exp = m[2] ? parseInt(m[2],10) : 1;
+      const syms = splitUnitSymbols(m[1]) || [m[1]];
+      syms.forEach((sym, i) => terms.push([sym, sign * (i === syms.length - 1 ? exp : 1)]));
     });
   }
   const parts = s.split('/');
   addTerms(parts[0], 1);
   for (let i=1; i<parts.length; i++) addTerms(parts[i], -1);
+  return terms;
+}
+// Parse "m/s", "kN/m^2", "mm²" into {sym: exponent} map.
+function parseUnitStr(unitStr) {
+  const result = {};
+  for (const [sym, exp] of unitTerms(unitStr)) {
+    result[sym] = (result[sym] || 0) + exp;
+    if (!result[sym]) delete result[sym];
+  }
   return result;
 }
 function unitMul(a, b) {
@@ -1424,6 +1472,15 @@ function unitObjToLatex(u) {
   const denStr = neg.map(([s,e])=>fmt(s,e)).join('{\\cdot}');
   return '\\,'+(posStr||'1')+'/'+denStr;
 }
+// Format the written terms as LaTeX, keeping their order: [['kN',1],['m',1],['m',-1]]
+// becomes "\\,\\text{kN}{\\cdot}\\text{m}/\\text{m}".
+function unitTermsToLatex(terms) {
+  const fmt = ([sym,exp]) => { const s='\\text{'+sym.replace(/[{}\\]/g,'')+'}'; const ae=Math.abs(exp); return ae===1?s:s+'^{'+ae+'}'; };
+  const pos = terms.filter(([,e])=>e>0), neg = terms.filter(([,e])=>e<0);
+  const posStr = pos.map(fmt).join('{\\cdot}');
+  if (!neg.length) return '\\,'+posStr;
+  return '\\,'+(posStr||'1')+'/'+neg.map(fmt).join('{\\cdot}');
+}
 // Fundamental SI decomposition for named unit symbols (dimension only — ignores scale prefixes)
 const UNIT_FUNDAMENTALS = {
   kg:{kg:1}, m:{m:1}, s:{s:1}, A:{A:1}, K:{K:1},
@@ -1458,7 +1515,10 @@ function simplifyUnitStr(unitObj) {
 }
 // Evaluate the result unit of a formula given variable unit strings.
 function evalUnitExpr(formula, varUnitsMap) {
-  if (!varUnitsMap||!Object.keys(varUnitsMap).length) return {};
+  // No early return when nothing has a unit yet: an expression can carry its own
+  // units in literals ("20kNm + 5kNm"), and bailing out here left the very first
+  // definition in a document with no unit at all.
+  if (!varUnitsMap) return {};
   const toks = tokenize(formula.replace(/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*(?=\()/g,(m,n)=>n.toUpperCase()+m.slice(n.length)));
   let pos=0;
   const peek=()=>toks[pos], consume=()=>toks[pos++], eat=t=>{if(peek().t===t){consume();return true;}return false;};
@@ -1467,7 +1527,7 @@ function evalUnitExpr(formula, varUnitsMap) {
   function parseTerm(){let l=parseUnary();while(peek().t==='*'||peek().t==='/'){const op=consume().t;const r=parseUnary();l=op==='*'?unitMul(l,r):unitDiv(l,r);}return l;}
   function parseUnary(){if(peek().t==='-'||peek().t==='+'){consume();return parseUnary();}return parsePower();}
   function parsePower(){const base=parsePrimary();if(peek().t==='^'){consume();let sign=1;if(peek().t==='-'){consume();sign=-1;}else if(peek().t==='+')consume();if(peek().t==='num'){const n=parseFloat(consume().v)*sign;return unitPow(base,n);}parseUnary();return null;}return base;}
-  function parsePrimary(){const tok=peek();if(tok.t==='('){consume();const r=parseExpr();eat(')');return r;}if(tok.t==='num'){consume();if(peek().t==='id'&&Object.prototype.hasOwnProperty.call(UNIT_CONVERSIONS,peek().v)){const u=consume().v;return parseUnitStr(UNIT_SI_BASE[u]||u);}return{};}if(tok.t==='id'){const fn=tok.v.toUpperCase();consume();if(peek().t==='(')return parseCall(fn);const u=varUnitsMap[tok.v];if(u)return parseUnitStr(u);if(Object.prototype.hasOwnProperty.call(vars,tok.v))return{};return{};}consume();return null;}
+  function parsePrimary(){const tok=peek();if(tok.t==='('){consume();const r=parseExpr();eat(')');return r;}if(tok.t==='num'){consume();if(peek().t==='id'&&splitUnitSymbols(peek().v)){const u=consume().v;return unitObjToSIBase(parseUnitStr(u));}return{};}if(tok.t==='id'){const fn=tok.v.toUpperCase();consume();if(peek().t==='(')return parseCall(fn);const u=varUnitsMap[tok.v];if(u)return parseUnitStr(u);if(Object.prototype.hasOwnProperty.call(vars,tok.v))return{};return{};}consume();return null;}
 
   // Consume tokens up to the ')' closing the call we are inside.
   function skipToClose(){let d=1;while(peek().t!=='EOF'){const t=consume();if(t.t==='(')d++;else if(t.t===')'){d--;if(!d)return;}}}
@@ -1862,7 +1922,7 @@ function toLatex(rawFormula, subsMap) {
       // name wins over the unit, matching how evalFormula resolves the ambiguity.
       const nxt = peek();
       if (nxt.t === 'id' &&
-          Object.prototype.hasOwnProperty.call(UNIT_CONVERSIONS, nxt.v) &&
+          splitUnitSymbols(nxt.v) &&
           !(subsMap && Object.prototype.hasOwnProperty.call(subsMap, nxt.v)) &&
           !Object.prototype.hasOwnProperty.call(vars, nxt.v)) {
         consume();
