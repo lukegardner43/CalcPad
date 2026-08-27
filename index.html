@@ -2208,55 +2208,109 @@ function makeVarErrorChip(varName, expr, result, isError, dispUnit) {
   return chip;
 }
 
-function startEditFormulaChip(chip) {
-  formulaBuffer = null;
+// The text a chip expands back to when it is opened for editing, or null if it
+// carries nothing editable. Only what the user actually typed goes back in: a
+// [kN] display spec is theirs, and so is the unit on a literal like "0.6 kN/m2",
+// but the unit on an expression chip is inferred, and putting that back produced
+// un-evaluable text ("V = w*B N/m"). Documents saved before that fix still carry
+// one, hence the varExpr check.
+function chipEditText(chip) {
+  if (chip.classList.contains('var-def-chip')) {
+    const name = chip.dataset.varName;
+    if (!name) return null;
+    const expr = chip.dataset.varExpr || chip.dataset.varOrigNum || chip.dataset.varVal;
+    const unit = chip.dataset.varUnit || '';
+    const displayUnit = chip.dataset.varDisplayUnit || '';
+    const unitSuffix = displayUnit ? ' [' + displayUnit + ']'
+                     : (unit && !chip.dataset.varExpr ? ' ' + unit : '');
+    return name + ' = ' + expr + unitSuffix;
+  }
   const formula = chip.dataset.formula;
-  if (!formula) return;
-  // Remove the trailing non-breaking space spacer so cursor lands in the text node
-  const next = chip.nextSibling;
-  if (next && next.nodeType === Node.TEXT_NODE && next.textContent === ' ') next.remove();
+  if (!formula) return null;
   const outputUnit = chip.dataset.formulaUnit || '';
   // A failed variable definition edits as the whole "name = expr" again, so
   // correcting it recreates the variable instead of leaving the name behind.
   const pending = chip.dataset.varPending || '';
-  const textNode = document.createTextNode(
-    (pending ? pending + ' = ' : '=') + formula + (outputUnit ? ' [' + outputUnit + ']' : ''));
-  chip.parentNode.replaceChild(textNode, chip);
+  return (pending ? pending + ' = ' : '=') + formula + (outputUnit ? ' [' + outputUnit + ']' : '');
+}
+
+// Put the caret at the end of the text a chip has just expanded into.
+function caretAtEndOf(textNode) {
   const range = document.createRange();
   range.setStart(textNode, textNode.length);
   range.collapse(true);
   const sel = window.getSelection();
   sel.removeAllRanges();
   sel.addRange(range);
+}
+
+// Chips joined by semicolons are one line — "b = 200 mm; h = 400 mm" is a single
+// thought — so opening any of them opens the whole run. Editing one on its own
+// left the others as chips with loose text between them, to be re-committed
+// piecemeal. Returns null when the chip stands on its own.
+function definitionLineRun(chip) {
+  const isChip = n => n && n.nodeType === Node.ELEMENT_NODE &&
+    (n.classList.contains('var-def-chip') || n.classList.contains('formula-chip'));
+  // The separator holds the semicolon and anything typed after it (a description
+  // before the next name); an '=' or a line break means it is prose, not a join.
+  const isSep = n => n && n.nodeType === Node.TEXT_NODE &&
+    n.textContent.indexOf(';') !== -1 && !/[\n=]/.test(n.textContent);
+  let first = chip, last = chip;
+  while (isSep(first.previousSibling) && isChip(first.previousSibling.previousSibling))
+    first = first.previousSibling.previousSibling;
+  while (isSep(last.nextSibling) && isChip(last.nextSibling.nextSibling))
+    last = last.nextSibling.nextSibling;
+  if (first === last) return null;
+  let text = '';
+  for (let n = first; ; n = n.nextSibling) {
+    if (isChip(n)) { const t = chipEditText(n); if (t === null) return null; text += t; }
+    else text += n.textContent;
+    if (n === last) break;
+  }
+  return { first, last, text };
+}
+
+// Expand a whole semicolon-separated line back to text. False when the chip
+// isn't part of one, so the caller falls back to opening it on its own.
+function startEditDefinitionLine(chip) {
+  const run = definitionLineRun(chip);
+  if (!run) return false;
+  formulaBuffer = null;
+  _editingVarDef = true;
+  // Remove the trailing spacer so the caret lands in the text node
+  const next = run.last.nextSibling;
+  if (next && next.nodeType === Node.TEXT_NODE && next.textContent === ' ') next.remove();
+  const textNode = document.createTextNode(run.text);
+  const parent = run.first.parentNode;
+  for (let n = run.first; n !== run.last; ) { const nx = n.nextSibling; n.remove(); n = nx; }
+  parent.replaceChild(textNode, run.last);
+  caretAtEndOf(textNode);
+  return true;
+}
+
+function startEditFormulaChip(chip) {
+  formulaBuffer = null;
+  if (!chip.dataset.formula) return;
+  // Remove the trailing non-breaking space spacer so cursor lands in the text node
+  const next = chip.nextSibling;
+  if (next && next.nodeType === Node.TEXT_NODE && next.textContent === ' ') next.remove();
+  const textNode = document.createTextNode(chipEditText(chip));
+  chip.parentNode.replaceChild(textNode, chip);
+  caretAtEndOf(textNode);
   formulaBuffer = '';
 }
 
 function startEditVarDefChip(chip) {
+  const editText = chipEditText(chip);
+  if (editText === null) return;
   formulaBuffer = null;
   _editingVarDef = true;
-  const name = chip.dataset.varName;
-  const expr = chip.dataset.varExpr || chip.dataset.varOrigNum || chip.dataset.varVal;
-  const unit = chip.dataset.varUnit || '';
-  if (!name) return;
   // Remove the trailing non-breaking space spacer so cursor lands in the text node
   const next = chip.nextSibling;
   if (next && next.nodeType === Node.TEXT_NODE && next.textContent === ' ') next.remove();
-  const displayUnit = chip.dataset.varDisplayUnit || '';
-  // Only put back what the user actually typed. A [kN] display spec is theirs, and
-  // so is the unit on a literal like "0.6 kN/m2" — but the unit on an expression
-  // chip is inferred, and appending it produced un-evaluable text ("V = w*B N/m").
-  // Documents saved before that fix still carry one, hence the varExpr check.
-  const unitSuffix = displayUnit ? ' [' + displayUnit + ']'
-                   : (unit && !chip.dataset.varExpr ? ' ' + unit : '');
-  const editText = name + ' = ' + expr + unitSuffix;
   const textNode = document.createTextNode(editText);
   chip.parentNode.replaceChild(textNode, chip);
-  const range = document.createRange();
-  range.setStart(textNode, textNode.length);
-  range.collapse(true);
-  const sel = window.getSelection();
-  sel.removeAllRanges();
-  sel.addRange(range);
+  caretAtEndOf(textNode);
 }
 
 // Compute the on-screen value + unit for a formula result (result = the raw SI
@@ -3337,7 +3391,7 @@ document.addEventListener('keydown', e => {
     const fullText = node.textContent.trim();
     // Several definitions separated by semicolons: "b = 200 mm; h = 400 mm".
     // Only when every part is one, so prose containing a semicolon stays prose.
-    const segs = definitionSegments(fullText);
+    const segs = definitionSegments(node.textContent);   // untrimmed: keeps the leading spacer
     if (segs) {
       // A clash anywhere in the line stops the whole line, so nothing is
       // half-committed and the user can rename before pressing Enter again.
@@ -3588,9 +3642,11 @@ function splitTopLevelSemicolons(text) {
     const c = text[i];
     if (c === '(' || c === '[' || c === '{') depth++;
     else if (c === ')' || c === ']' || c === '}') depth--;
-    else if (c === ';' && depth <= 0) { parts.push(text.slice(start, i).trim()); start = i + 1; }
+    else if (c === ';' && depth <= 0) { parts.push(text.slice(start, i)); start = i + 1; }
   }
-  parts.push(text.slice(start).trim());
+  parts.push(text.slice(start));
+  // Not trimmed: the spacer that separates this line from the chips before it
+  // lives at the front of the first part, and losing it ran the lines together.
   return parts;
 }
 
@@ -3606,12 +3662,13 @@ function definitionName(text) {
 // sentence containing a semicolon is left as text. Returns null otherwise.
 function definitionSegments(text) {
   const segs = splitTopLevelSemicolons(text);
-  if (segs.length < 2) return null;                            // no semicolon to split on
-  while (segs.length && !segs[segs.length - 1]) segs.pop();    // tolerate "b = 200 mm;"
-  // Empty leading parts are kept: editing the second chip of a committed line
+  if (segs.length < 2) return null;                                   // no semicolon to split on
+  while (segs.length && !segs[segs.length - 1].trim()) segs.pop();    // tolerate "b = 200 mm;"
+  // Blank leading parts are kept: editing the second chip of a committed line
   // hands back "; h = 400 mm", and that semicolon has to survive the re-commit.
-  if (!segs.some(Boolean)) return null;
-  return segs.filter(Boolean).every(s => definitionName(s)) ? segs : null;
+  const real = segs.filter(s => s.trim());
+  if (!real.length) return null;
+  return real.every(s => definitionName(s)) ? segs : null;
 }
 
 // Works out what "name = expr" evaluates to, using the same rules as the Enter
@@ -3671,10 +3728,12 @@ function commitDefinitionLine(textNode, segs) {
   _editCommitPending = true; setTimeout(() => { _editCommitPending = false; }, 500);
   const frag = document.createDocumentFragment();
   segs.forEach((seg, i) => {
-    if (i) frag.appendChild(document.createTextNode('; '));
     const d = parseVarDefinition(seg);
+    // Semicolon and whatever followed it go in one text node, which is what
+    // marks the chips either side as parts of the same line afterwards.
+    const lead = (i ? ';' : '') + (d ? d.prefix : '');
+    if (lead) frag.appendChild(document.createTextNode(lead));
     if (!d) { frag.appendChild(document.createTextNode(seg)); return; }
-    if (d.prefix) frag.appendChild(document.createTextNode(d.prefix));
     if (d.failed) {
       frag.appendChild(makeVarErrorChip(d.name, d.expr, d.result, d.isError, d.dispUnit));
       return;
@@ -3705,7 +3764,7 @@ function commitFormula(ed) {
   // Several definitions on one line: "b = 200 mm; h = 400 mm". Handled before the
   // single-definition split below, which would otherwise take the first '=' and
   // swallow the rest of the line into that one expression.
-  const segs = definitionSegments(text.trim());
+  const segs = definitionSegments(text);   // untrimmed: the leading spacer is part of it
   if (segs) {
     const names = segs.map(definitionName);
     const repeated = names.some((n, i) => names.indexOf(n) !== i);
@@ -3849,7 +3908,8 @@ document.addEventListener('dblclick', e => {
   const chip = e.target.closest('.var-def-chip');
   if (chip && chip.closest('.calc-area') && !e.target.closest('.vdc-edit-input')) {
     e.preventDefault();
-    startEditVarDefChip(chip);
+    // A semicolon-separated line opens as a whole; a lone chip opens by itself.
+    if (!startEditDefinitionLine(chip)) startEditVarDefChip(chip);
   }
 });
 
@@ -4284,7 +4344,7 @@ function renamePastedText(text, map) {
       const expr = isDesc ? m[3] : m[2];
       const prefix = isDesc ? m[1] : '';
       return prefix + (map[name] || name) + ' = ' + sub(expr);
-    }).join('; ');
+    }).join(';');
     return renamed === t ? line : line.replace(t, renamed);
   }).join('\n');
 }
