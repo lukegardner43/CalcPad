@@ -3278,10 +3278,15 @@ function getAllEditors() {
 }
 
 // Override rebuildVars to scan all editors in document order (vars then formulas interleaved)
-function rebuildVars() {
+// seed carries what the previous pass managed to resolve — see the retry at the
+// end of this function.
+function rebuildVars(seed) {
   _rebuildActive = true;
-  vars = {};
-  varUnits = {};
+  vars = seed ? { ...seed.vars } : {};
+  varUnits = seed ? { ...seed.units } : {};
+  // Definitions that could not be evaluated this pass, usually because they are
+  // written above the terms they use.
+  let unresolved = 0;
   // Names already defined earlier in the document. A repeat (usually pasted)
   // is flagged instead of silently overwriting the first definition, which
   // used to leave the sidebar and substitutions disagreeing. Recomputed every
@@ -3350,6 +3355,12 @@ function rebuildVars() {
               renderVarChipContent(chip);
             }
           } catch(e) {
+            // Fall back to the stored result so the rest of the document still
+            // has a value, and ask for another pass: the terms this definition
+            // needs may be further down. Without the retry it kept the value but
+            // lost its unit, and everything downstream then reported a unit
+            // mismatch against a dimension it no longer had.
+            unresolved++;
             const fallback = parseFloat(chip.dataset.varVal);
             if (!isNaN(fallback)) { vars[name] = fallback; if (unit) varUnits[name] = siUnit; }
           }
@@ -3397,6 +3408,19 @@ function rebuildVars() {
     _rebuildPromoted = false;
     _rebuildDepth++;
     try { rebuildVars(); } finally { _rebuildDepth--; }
+    return;
+  }
+  // Something did not evaluate. Run again over what this pass did resolve, so a
+  // definition written above the terms it uses settles on the real value and
+  // unit rather than its stored fallback. Each pass carries the answer one step
+  // further up the document, so the chain continues while the result keeps
+  // changing and stops as soon as it doesn't — bounded, so a circular reference
+  // gives up rather than looping. A document in order never starts the chain.
+  const snapshot = JSON.stringify([vars, varUnits]);
+  if (_rebuildDepth < 8 && (unresolved || seed) && (!seed || seed.snapshot !== snapshot)) {
+    _rebuildDepth++;
+    try { rebuildVars({ vars: { ...vars }, units: { ...varUnits }, snapshot }); }
+    finally { _rebuildDepth--; }
     return;
   }
   _rebuildPromoted = false;
