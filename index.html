@@ -2035,16 +2035,16 @@ function toLatex(rawFormula, subsMap) {
         eat(')');
         return latexFunc(tok.v.toUpperCase(), args);
       }
-      // "f_ck[#MPa]" reads as the bare number, so the substitution shows that
-      // number and the expression keeps the unit marker to say which it is.
+      // "f_ck[#MPa]" reads as the bare number: the name renders on its own and
+      // the substitution shows the number in that unit. The bracketed unit is
+      // an instruction to the tool, not part of the equation being presented.
       if (tok.unit !== undefined) {
-        const marker = tok.unit ? '\\,[' + unitToLatex(tok.unit).replace(/^\\,/, '') + ']' : '';
         if (subsMap && Object.prototype.hasOwnProperty.call(subsMap, tok.v)) {
           const f = tok.unit ? getUnitConversionFactor(parseUnitStr(tok.unit)) : 1;
           const raw = parseFloat(String(subsMap[tok.v].si));
           if (f !== null && !isNaN(raw)) return fmtNumDisplay(raw / f).replace(/,/g, '');
         }
-        return latexIdent(tok.v) + marker;
+        return latexIdent(tok.v);
       }
       if (subsMap && Object.prototype.hasOwnProperty.call(subsMap, tok.v)) {
         const entry = subsMap[tok.v];
