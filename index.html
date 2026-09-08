@@ -331,6 +331,10 @@ body{
 .sref-t{font-size:9px;color:var(--rubine);text-transform:uppercase;letter-spacing:.07em;font-weight:700;margin-bottom:5px}
 .sref-i{font-size:9.5px;color:var(--mid);padding:1px 0;font-family:"Courier New",monospace}
 .sref-i span{color:var(--dark)}
+/* Prose lines in the reference panel: not code, so not monospace. */
+.sref-d{font-size:9px;color:var(--mid);line-height:1.35;padding:0 0 4px;margin-top:-1px}
+.sref-sub{font-size:8.5px;color:var(--rubine);text-transform:uppercase;letter-spacing:.06em;
+  font-weight:700;margin:7px 0 3px}
 /* ── Unit preference panel ── */
 .supref-row{display:flex;align-items:center;padding:3px 6px;border-bottom:1px solid #f0eef8}
 .supref-lbl{font-size:9.5px;color:var(--mid);flex:1}
@@ -532,6 +536,8 @@ body{
     <div class="hpill"><code>=x^2+3</code> + Enter → formula</div>
     <div class="hpill"><code>x = 42 mm</code> → input unit</div>
     <div class="hpill"><code>= expr [mm]</code> → output unit</div>
+    <div class="hpill"><code>[#MPa]</code> → force unit, no check</div>
+    <div class="hpill"><code>f_ck[#MPa]</code> → value as a plain number</div>
   </div>
 </div>
 
@@ -671,6 +677,35 @@ body{
         <!-- rows injected by buildUnitPrefPanel() -->
       </div>
       <div class="sref">
+        <div class="sref-t">Units</div>
+        <div class="sref-i"><span>x = 42 mm</span></div>
+        <div class="sref-d">A value with the unit it is in.</div>
+        <div class="sref-i"><span>= expr [kN]</span></div>
+        <div class="sref-d">Show the answer in kN. Must match the
+          dimension the formula works out to.</div>
+        <div class="sref-i"><span>[kNm/m]  [mm2/m]</span></div>
+        <div class="sref-d">Kept as written rather than reduced.</div>
+        <div class="sref-sub">Overrides</div>
+        <div class="sref-d">For empirical code formulas. Several
+          Eurocode expressions — the shear ones among
+          them — are calibrated for particular units and
+          do not carry their dimensions through, so the
+          unit CalcPad works out is wrong.</div>
+        <div class="sref-i"><span>x = expr [#MPa]</span></div>
+        <div class="sref-d">Force MPa: no conversion and no dimension
+          check. The number as it stands is taken to be
+          the value in MPa, and is stored as such, so
+          anything using x still works. Where the units
+          are already right, use plain [MPa] — this one
+          relabels, it does not convert.</div>
+        <div class="sref-i"><span>x = expr [#]</span></div>
+        <div class="sref-d">Strip the unit and leave a plain number.</div>
+        <div class="sref-i"><span>f_ck[#MPa]</span></div>
+        <div class="sref-d">Inside a formula: f_ck as a plain number in
+          MPa. For example
+          <br><code>k = 1+sqrt(f_ck[#MPa]/200) [#MPa]</code></div>
+      </div>
+      <div class="sref">
         <div class="sref-t">Functions</div>
         <div class="sref-i"><span>=SUM(a,b,…)</span></div>
         <div class="sref-i"><span>=AVG(a,b,…)</span></div>
@@ -784,7 +819,8 @@ function renderSidebar() {
     let dispVal = fmtNum(vars[name]);
     let unit = '';
     if (chip) {
-      const du = chip.dataset.varDisplayUnit || chip.dataset.varUnit || '';
+      const spec = displayUnitSpec(chip.dataset.varDisplayUnit || '');
+      const du = spec.unit || (chip.dataset.varDisplayUnit ? '' : (chip.dataset.varUnit || ''));
       if (du) {
         // Explicit unit on chip — use it directly
         unit = du;
@@ -795,6 +831,8 @@ function renderSidebar() {
           const f = getUnitConversionFactor(parseUnitStr(du));
           dispVal = fmtNum(f !== null ? vars[name] / f : vars[name]);
         }
+      } else if (chip.dataset.varDisplayUnit) {
+        // "[#]" — the unit was stripped on purpose, so show the bare number.
       } else if (chip.dataset.varExpr) {
         // No explicit unit — apply preferred units based on auto-detected dimension
         const exprUnit = evalUnitExpr(chip.dataset.varExpr, varUnits);
@@ -1068,6 +1106,18 @@ function toJsExpr(raw, variables_, free) {
       return '(' + (parseFloat(numStr) * factor) + ')';
     });
   }
+  // "f_ck[#MPa]" becomes the plain number f_ck is worth in MPa. Done before the
+  // variable substitution below, which would otherwise leave the brackets
+  // dangling after the value — and before assertSafeExpr, which refuses them.
+  expr = expr.replace(/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\[\s*#\s*([^\]]*?)\s*\]/g, (m, name, unit) => {
+    const factor = unit ? getUnitConversionFactor(parseUnitStr(unit)) : 1;
+    if (factor === null) throw new Error(`[${unit}] is not a unit CalcPad knows`);
+    if (free && free.has(name)) return '(' + name + '/' + factor + ')';
+    if (!Object.prototype.hasOwnProperty.call(variables_, name)) throw new Error(`${name} is not defined`);
+    const v = parseFloat(variables_[name]);
+    if (isNaN(v)) throw new Error(`${name} is not a number`);
+    return '(' + (v / factor) + ')';
+  });
   expr = transformPowers(expr);
   const vnames = Object.keys(variables_).sort((a,b) => b.length - a.length);
   for (const vn of vnames) {
@@ -1341,6 +1391,27 @@ function usedVars(formula) {
   return Object.keys(vars).filter(n => new RegExp(`\\b${n}\\b`).test(formula));
 }
 
+// A display spec written with a leading hash — "[#MPa]" — forces the unit
+// instead of converting to it: the number is taken exactly as the formula
+// produced it and simply declared to be in that unit, with no dimension check.
+// Empirical code formulas need this. Several Eurocode expressions (the shear
+// resistance ones among them) are calibrated for numbers in particular units
+// and don't carry their dimensions through the algebra, so the unit CalcPad
+// works out is wrong and the answer is not. "[#]" on its own strips the unit
+// and leaves a plain number.
+function displayUnitSpec(spec) {
+  const s = (spec || '').trim();
+  const forced = s.charAt(0) === '#';
+  return { forced, unit: forced ? s.slice(1).trim() : s };
+}
+
+// "f_ck[#MPa]" written inside an expression: the variable's value as a plain
+// number in that unit, not an SI quantity. Empirical code formulas are
+// calibrated for particular units — Eurocode 2's k factor wants f_ck in MPa —
+// and no amount of unit algebra can know that. Anchored at the start because it
+// is matched against the text immediately following an identifier.
+const INLINE_UNIT_RE = /^\s*\[\s*#\s*([^\]]*?)\s*\]/;
+
 function unitToLatex(unit) {
   // Rendered in the order written rather than reduced: a moment per metre width
   // is kN·m/m, and cancelling it to kN throws away what the number means. Only
@@ -1527,7 +1598,7 @@ function evalUnitExpr(formula, varUnitsMap) {
   function parseTerm(){let l=parseUnary();while(peek().t==='*'||peek().t==='/'){const op=consume().t;const r=parseUnary();l=op==='*'?unitMul(l,r):unitDiv(l,r);}return l;}
   function parseUnary(){if(peek().t==='-'||peek().t==='+'){consume();return parseUnary();}return parsePower();}
   function parsePower(){const base=parsePrimary();if(peek().t==='^'){consume();let sign=1;if(peek().t==='-'){consume();sign=-1;}else if(peek().t==='+')consume();if(peek().t==='num'){const n=parseFloat(consume().v)*sign;return unitPow(base,n);}parseUnary();return null;}return base;}
-  function parsePrimary(){const tok=peek();if(tok.t==='('){consume();const r=parseExpr();eat(')');return r;}if(tok.t==='num'){consume();if(peek().t==='id'&&splitUnitSymbols(peek().v)){const u=consume().v;return unitObjToSIBase(parseUnitStr(u));}return{};}if(tok.t==='id'){const fn=tok.v.toUpperCase();consume();if(peek().t==='(')return parseCall(fn);const u=varUnitsMap[tok.v];if(u)return parseUnitStr(u);if(Object.prototype.hasOwnProperty.call(vars,tok.v))return{};return{};}consume();return null;}
+  function parsePrimary(){const tok=peek();if(tok.t==='('){consume();const r=parseExpr();eat(')');return r;}if(tok.t==='num'){consume();if(peek().t==='id'&&splitUnitSymbols(peek().v)){const u=consume().v;return unitObjToSIBase(parseUnitStr(u));}return{};}if(tok.t==='id'){const fn=tok.v.toUpperCase();const inlineUnit=tok.unit;consume();if(peek().t==='(')return parseCall(fn);if(inlineUnit!==undefined)return{};const u=varUnitsMap[tok.v];if(u)return parseUnitStr(u);if(Object.prototype.hasOwnProperty.call(vars,tok.v))return{};return{};}consume();return null;}
 
   // Consume tokens up to the ')' closing the call we are inside.
   function skipToClose(){let d=1;while(peek().t!=='EOF'){const t=consume();if(t.t==='(')d++;else if(t.t===')'){d--;if(!d)return;}}}
@@ -1742,7 +1813,13 @@ function tokenize(expr) {
     } else if (/[a-zA-Z_]/.test(expr[i])) {
       let s = '';
       while (i < expr.length && /[a-zA-Z0-9_]/.test(expr[i])) s += expr[i++];
-      toks.push({ t: 'id', v: s });
+      const tok = { t: 'id', v: s };
+      // "f_ck[#MPa]" is the variable's value as a plain number in that unit —
+      // see INLINE_UNIT_RE. The hash is required so it can't be confused with
+      // the "[mm]" display spec that ends a line.
+      const m = INLINE_UNIT_RE.exec(expr.slice(i));
+      if (m) { tok.unit = m[1]; i += m[0].length; }
+      toks.push(tok);
     } else {
       toks.push({ t: expr[i], v: expr[i] }); i++;
     }
@@ -1958,6 +2035,17 @@ function toLatex(rawFormula, subsMap) {
         eat(')');
         return latexFunc(tok.v.toUpperCase(), args);
       }
+      // "f_ck[#MPa]" reads as the bare number, so the substitution shows that
+      // number and the expression keeps the unit marker to say which it is.
+      if (tok.unit !== undefined) {
+        const marker = tok.unit ? '\\,[' + unitToLatex(tok.unit).replace(/^\\,/, '') + ']' : '';
+        if (subsMap && Object.prototype.hasOwnProperty.call(subsMap, tok.v)) {
+          const f = tok.unit ? getUnitConversionFactor(parseUnitStr(tok.unit)) : 1;
+          const raw = parseFloat(String(subsMap[tok.v].si));
+          if (f !== null && !isNaN(raw)) return fmtNumDisplay(raw / f).replace(/,/g, '');
+        }
+        return latexIdent(tok.v) + marker;
+      }
       if (subsMap && Object.prototype.hasOwnProperty.call(subsMap, tok.v)) {
         const entry = subsMap[tok.v];
         if (entry.unit) return '\\left(' + entry.val + unitToLatex(entry.unit) + '\\right)';
@@ -1997,7 +2085,7 @@ function toLatexSubstituted(formula, variables, varUnitsMap) {
         valStr = fmtNumDisplay(rawSI).replace(/,/g, '');
         unit   = null;
       }
-      subsMap[vn] = { val: valStr, unit: unit || null };
+      subsMap[vn] = { val: valStr, unit: unit || null, si: rawSI };
       hasVars = true;
     }
   }
@@ -2026,6 +2114,7 @@ function renderVarChipContent(chip) {
   if (expr) {
     // Render:  name = <LaTeX expression> [ = substituted ] = value [unit]
     const displayUnit = chip.dataset.varDisplayUnit || '';
+    const dspec = displayUnitSpec(displayUnit);
     let exprUnit = evalUnitExpr(expr, varUnits);
     // Belt-and-suspenders: collapse any non-empty unit object that is fundamentally
     // dimensionless (e.g. kN/N or kN·m/kN·m when prefixes differ) so no unit is shown.
@@ -2034,7 +2123,8 @@ function renderVarChipContent(chip) {
       if (_fund !== null && !Object.keys(_fund).length) exprUnit = {};
     }
     // Check for unit dimension mismatch when a display unit is specified
-    if (displayUnit && exprUnit && Object.keys(exprUnit).length) {
+    // A forced "[#unit]" skips both checks — overriding them is the point of it.
+    if (displayUnit && !dspec.forced && exprUnit && Object.keys(exprUnit).length) {
       const specUnitObj = parseUnitStr(displayUnit);
       if (Object.keys(specUnitObj).length) {
         if (getUnitConversionFactor(specUnitObj) === null) {
@@ -2052,9 +2142,9 @@ function renderVarChipContent(chip) {
     }
     let exprUnitSuffix, displayValStr;
     if (displayUnit) {
-      const dFactor = getUnitConversionFactor(parseUnitStr(displayUnit));
+      const dFactor = getUnitConversionFactor(parseUnitStr(dspec.unit));
       displayValStr = fmtNumDisplay(dFactor !== null ? val / dFactor : val);
-      exprUnitSuffix = unitToLatex(displayUnit);
+      exprUnitSuffix = dspec.unit ? unitToLatex(dspec.unit) : '';
     } else {
       if (exprUnit && Object.keys(exprUnit).length) {
         const simplName = simplifyUnitStr(exprUnit);
@@ -2088,10 +2178,10 @@ function renderVarChipContent(chip) {
         `<span class="fseg"><span class="feq"> = </span>${kx(latexVal)}</span>` +
         `</span>`;
     } catch(e) {
-      inner = `<span class="vdc-name">${escHtml(name)} = ${escHtml(expr)} = </span><span class="vdc-val">${escHtml(displayValStr)}${displayUnit ? ' ' + escHtml(displayUnit) : (unit ? ' ' + escHtml(unit) : '')}</span>`;
+      inner = `<span class="vdc-name">${escHtml(name)} = ${escHtml(expr)} = </span><span class="vdc-val">${escHtml(displayValStr)}${dspec.unit ? ' ' + escHtml(dspec.unit) : (!displayUnit && unit ? ' ' + escHtml(unit) : '')}</span>`;
     }
     chip.innerHTML = inner;
-    chip.title = `${name} = ${expr} = ${displayValStr}${displayUnit ? ' ' + displayUnit : (unit ? ' ' + unit : '')}`;
+    chip.title = `${name} = ${expr} = ${displayValStr}${dspec.unit ? ' ' + dspec.unit : (!displayUnit && unit ? ' ' + unit : '')}`;
   } else if (unit) {
     // Render:  name = origValue unit  (show the value the user typed, not the SI-converted internal value)
     const displayVal = chip.dataset.varOrigNum || fmtNum(val);
@@ -2328,8 +2418,11 @@ function formulaDisplayParts(formula, result, outputUnit) {
     const _fund = toFundamental(resUnit);
     if (_fund !== null && !Object.keys(_fund).length) resUnit = {};
   }
+  const ospec = displayUnitSpec(outputUnit);
   if (outputUnit) {
-    if (resUnit && Object.keys(resUnit).length) {
+    // A forced "[#unit]" takes the number as it stands and labels it, with no
+    // conversion and no dimension check.
+    if (!ospec.forced && resUnit && Object.keys(resUnit).length) {
       // The expression already carries a dimension, so [unit] just says how to
       // display it. Check they're compatible, then convert the SI value.
       const specUnitObj = parseUnitStr(outputUnit);
@@ -2344,7 +2437,7 @@ function formulaDisplayParts(formula, result, outputUnit) {
     }
     // Dimensionless arithmetic ("=25.4 [mm]", "=4.6/100 [kN/m]"): there is no
     // unit to convert FROM, so [unit] states what the number already is.
-    return { val: fmtNumDisplay(rawSI), unit: outputUnit };
+    return { val: fmtNumDisplay(rawSI), unit: ospec.unit };
   }
   if (resUnit && Object.keys(resUnit).length) {
     const simplName  = simplifyUnitStr(resUnit);
@@ -2372,6 +2465,7 @@ function setFormulaContent(chip, formula, result, isError) {
     return;
   }
   const outputUnit = chip.dataset.formulaUnit || '';
+  const shownUnit = displayUnitSpec(outputUnit).unit;   // "[#MPa]" labels as MPa
   try {
     const lhs = toLatex(formula);
     const sub = toLatexSubstituted(formula, vars, varUnits);
@@ -2402,9 +2496,9 @@ function setFormulaContent(chip, formula, result, isError) {
       `<span class="fseg"><span class="feq"> = </span>${kx(rhs)}</span>` +
       `</span>`;
   } catch(e) {
-    chip.innerHTML = `<span style="font-style:italic">=${escHtml(formula)} = ${escHtml(result)}${outputUnit ? ' ' + escHtml(outputUnit) : ''}</span>`;
+    chip.innerHTML = `<span style="font-style:italic">=${escHtml(formula)} = ${escHtml(result)}${shownUnit ? ' ' + escHtml(shownUnit) : ''}</span>`;
   }
-  chip.title = `=${formula} = ${result}${outputUnit ? ' ' + outputUnit : ''}`;
+  chip.title = `=${formula} = ${result}${shownUnit ? ' ' + shownUnit : ''}`;
 }
 
 
@@ -3197,10 +3291,13 @@ function rebuildVars() {
                 const conv = applyUnitConversion(v, unit);
                 if (conv) siV = conv.siVal;
               } else if (dispUnit) {
-                const inf = evalUnitExpr(expr, varUnits);
+                const dspec = displayUnitSpec(dispUnit);
+                // "[#unit]" overrides whatever the algebra produced, so the
+                // inferred dimension is not consulted at all.
+                const inf = dspec.forced ? null : evalUnitExpr(expr, varUnits);
                 // A solved value is already in SI base units like any other
                 // computed result, so [unit] converts for display here too.
-                if (isSolverExpr(expr) || (inf && Object.keys(inf).length)) {
+                if (!dspec.forced && (isSolverExpr(expr) || (inf && Object.keys(inf).length))) {
                   // The expression already has a dimension, so evalFormula has
                   // returned SI and [unit] is display-only. Converting here
                   // double-converted it: "d = hh - bb [mm]" stored 0.0002 m
@@ -3211,9 +3308,10 @@ function rebuildVars() {
                   // base terms like every other entry in varUnits.
                   else varUnits[name] = unitObjToStr(unitObjToSIBase(parseUnitStr(dispUnit)));
                 } else {
-                  // Dimensionless arithmetic: [unit] declares what the number is
-                  // in, e.g. "w = 4.6/100 [kN/m]" → 46 N/m.
-                  const conv = applyUnitConversion(v, dispUnit);
+                  // Dimensionless arithmetic, or a forced "[#unit]": the unit
+                  // declares what the number already is, e.g. "w = 4.6/100
+                  // [kN/m]" → 46 N/m. "[#]" alone leaves it a plain number.
+                  const conv = applyUnitConversion(v, dspec.unit);
                   if (conv) { siV = conv.siVal; varUnits[name] = conv.siUnitStr; }
                 }
               } else {
