@@ -697,13 +697,19 @@ body{
           the value in MPa, and is stored as such, so
           anything using x still works. Where the units
           are already right, use plain [MPa] — this one
-          relabels, it does not convert.</div>
+          relabels, it does not convert. If any term in
+          the formula still carries a unit, that is
+          reported rather than quietly mixed in.</div>
         <div class="sref-i"><span>x = expr [#]</span></div>
         <div class="sref-d">Strip the unit and leave a plain number.</div>
         <div class="sref-i"><span>f_ck[#MPa]</span></div>
         <div class="sref-d">Inside a formula: f_ck as a plain number in
           MPa. For example
-          <br><code>k = 1+sqrt(f_ck[#MPa]/200) [#MPa]</code></div>
+          <br><code>k = 1+sqrt(f_ck[#MPa]/200) [#MPa]</code>
+          <br>Strip every term in a formula or none of
+          them: <code>v[#MPa]*b[#mm]*d[#mm] [#N]</code>
+          works, and so does plain <code>v*b*d [kN]</code>,
+          but mixing the two does not.</div>
       </div>
       <div class="sref">
         <div class="sref-t">Functions</div>
@@ -2123,6 +2129,17 @@ function renderVarChipContent(chip) {
       if (_fund !== null && !Object.keys(_fund).length) exprUnit = {};
     }
     // Check for unit dimension mismatch when a display unit is specified
+    // Forcing a named unit onto an expression that still carries a dimension
+    // means some terms were written as name[#unit] and others left as they are,
+    // so the number is a mixture of the two and whatever it is, it is not the
+    // unit being claimed. "[#]" is exempt: removing the unit is what it asks for.
+    if (dspec.forced && dspec.unit && exprUnit && Object.keys(exprUnit).length) {
+      const left = unitObjToStr(exprUnit);
+      chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">${escHtml(name)}: [#${escHtml(dspec.unit)}] but [${escHtml(left)}] is left over</span>`;
+      chip.title = `Some terms still carry units ([${left}]). Write those as name[#unit] too, ` +
+                   `or drop the # and use [${dspec.unit}].`;
+      return;
+    }
     // A forced "[#unit]" skips both checks — overriding them is the point of it.
     if (displayUnit && !dspec.forced && exprUnit && Object.keys(exprUnit).length) {
       const specUnitObj = parseUnitStr(displayUnit);
@@ -2419,6 +2436,8 @@ function formulaDisplayParts(formula, result, outputUnit) {
     if (_fund !== null && !Object.keys(_fund).length) resUnit = {};
   }
   const ospec = displayUnitSpec(outputUnit);
+  if (ospec.forced && ospec.unit && resUnit && Object.keys(resUnit).length)
+    return { leftover: unitObjToStr(resUnit), forcedUnit: ospec.unit };
   if (outputUnit) {
     // A forced "[#unit]" takes the number as it stands and labels it, with no
     // conversion and no dimension check.
@@ -2478,6 +2497,13 @@ function setFormulaContent(chip, formula, result, isError) {
       chip.appendChild(sp);
       chip.className = 'formula-chip error';
       chip.title = `[${parts.unknownUnit}] is not a unit CalcPad knows`;
+      return;
+    }
+    if (parts.leftover) {
+      chip.innerHTML = `<span style="font-style:italic;color:var(--rubine)">[#${escHtml(parts.forcedUnit)}] but [${escHtml(parts.leftover)}] is left over</span>`;
+      chip.className = 'formula-chip error';
+      chip.title = `Some terms still carry units ([${parts.leftover}]). Write those as name[#unit] too, ` +
+                   `or drop the # and use [${parts.forcedUnit}].`;
       return;
     }
     if (parts.mismatch) {
