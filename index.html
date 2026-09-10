@@ -101,6 +101,54 @@ body{
 .fd-item svg{width:13px;height:13px;fill:currentColor;flex-shrink:0;opacity:.7}
 .fd-sep{height:1px;background:#eee;margin:3px 0}
 
+/* ── Project panel ── */
+.fd-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;
+  color:#aaa;padding:5px 14px 2px}
+.fd-proj{opacity:.4;pointer-events:none}
+body.has-project .fd-proj{opacity:1;pointer-events:auto}
+
+.proj-panel{position:fixed;left:0;top:0;bottom:0;width:230px;background:#fff;
+  border-right:1px solid #ddd;box-shadow:2px 0 10px rgba(0,0,0,.08);z-index:150;
+  display:none;flex-direction:column;font-family:Arial,sans-serif}
+.proj-panel.open{display:flex}
+.proj-head{padding:9px 12px;border-bottom:1px solid #eee;background:#fafafa;flex-shrink:0}
+.proj-title{font-size:12px;font-weight:700;color:var(--rubine);word-break:break-word;line-height:1.35}
+.proj-sub{font-size:9.5px;color:var(--mid);margin-top:2px}
+.proj-list{flex:1;overflow-y:auto;padding:5px 0}
+.proj-item{display:flex;align-items:center;gap:5px;padding:5px 8px 5px 6px;cursor:default;
+  border-left:3px solid transparent;font-size:11px;color:var(--dark)}
+.proj-item:hover{background:#fbf5f9}
+.proj-item.on{background:#fce6f1;border-left-color:var(--rubine)}
+.proj-num{font-size:9.5px;color:#bbb;min-width:13px;text-align:right;flex-shrink:0}
+.proj-name{flex:1;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:1px 0}
+.proj-item.on .proj-name{font-weight:700;color:var(--rubine)}
+.proj-acts{display:flex;gap:1px;opacity:0;flex-shrink:0}
+.proj-item:hover .proj-acts,.proj-item.on .proj-acts{opacity:1}
+.proj-act{width:16px;height:16px;border:none;background:transparent;cursor:pointer;
+  color:var(--mid);font-size:10px;line-height:1;padding:0;border-radius:2px}
+.proj-act:hover{background:#f2d5e5;color:var(--rubine)}
+.proj-act[disabled]{opacity:.25;cursor:default}
+.proj-act[disabled]:hover{background:transparent;color:var(--mid)}
+.proj-foot{flex-shrink:0;border-top:1px solid #eee;padding:7px;display:flex;
+  flex-direction:column;gap:4px;background:#fafafa}
+.proj-btn{padding:5px 8px;border:1px solid #ddd;background:#fff;border-radius:2px;
+  cursor:pointer;font-size:10.5px;font-family:Arial,sans-serif;color:var(--dark)}
+.proj-btn:hover{border-color:#f4a8cc;color:var(--rubine);background:#fff5fa}
+.proj-btn-print{background:var(--rubine);color:#fff;border-color:var(--rubine);font-weight:700}
+.proj-btn-print:hover{background:#b8005e;color:#fff}
+/* The toolbar is width:100% of the body box, so padding here narrows it too
+   and every control stays reachable rather than sitting under the panel. */
+body.has-project{padding-left:230px}
+
+/* Pack print: built alongside the live pages, shown only while printing one. */
+.pack-print{display:none}
+.pack-contents-title{font-size:16px;font-weight:700;color:var(--rubine);
+  margin:0 0 14px;padding-bottom:5px;border-bottom:2px solid var(--rubine)}
+.pack-toc-row{display:flex;align-items:baseline;gap:5px;padding:3.5px 0;font-size:11px}
+.pack-toc-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:80%}
+.pack-toc-dots{flex:1;border-bottom:1px dotted #bbb;transform:translateY(-3px)}
+.pack-toc-page{font-weight:700;color:var(--dark);flex-shrink:0}
+
 /* Colour picker */
 .colour-wrap{position:relative;display:inline-flex;align-items:center}
 .colour-btn{width:26px;height:26px;border:1px solid #ddd;border-radius:2px;
@@ -365,7 +413,13 @@ body{
 
   html{height:auto!important}
   .toolbar,.sidebar,.add-page-btn,.del-page-btn,.overflow-indicator,.alpha-banner,
-  .pg-content-overflow{display:none!important;border-color:var(--bdr)!important}
+  .pg-content-overflow,.proj-panel{display:none!important;border-color:var(--bdr)!important}
+
+  /* Printing a pack swaps the live document out for the assembled one. The
+     live pages are only hidden, never altered, so cancelling costs nothing. */
+  body{padding-left:0!important}
+  body.printing-pack .page-stack{display:none!important}
+  body.printing-pack .pack-print{display:block!important}
 
   body{background:#fff!important;padding:0;margin:0;display:block;height:auto!important}
   .page-stack{margin:0;gap:0;display:block}
@@ -451,10 +505,21 @@ body{
       <div class="fd-item" onclick="fileSave()"><svg viewBox="0 0 14 14"><path d="M1 1h9l3 3v9H1V1zm4 0v5h4V1M4 8h6v5H4V8"/></svg>Save</div>
       <div class="fd-item" onclick="fileSaveAs()"><svg viewBox="0 0 14 14"><path d="M1 1h9l3 3v9H1V1zm4 0v5h4V1M4 8h6v5H4V8"/></svg>Save as…</div>
       <div class="fd-sep"></div>
+      <div class="fd-label">Project</div>
+      <div class="fd-item" onclick="projectNew()"><svg viewBox="0 0 14 14"><path d="M1 3h4l1 1.5h7V12H1V3z"/></svg>New project</div>
+      <div class="fd-item" onclick="projectOpen()"><svg viewBox="0 0 14 14"><path d="M1 3h4l1 1.5h7V12H1V3z"/></svg>Open project…</div>
+      <div class="fd-item fd-proj" onclick="projectSave()"><svg viewBox="0 0 14 14"><path d="M1 1h9l3 3v9H1V1zm4 0v5h4V1M4 8h6v5H4V8"/></svg>Save project</div>
+      <div class="fd-item fd-proj" onclick="projectSaveAs()"><svg viewBox="0 0 14 14"><path d="M1 1h9l3 3v9H1V1zm4 0v5h4V1M4 8h6v5H4V8"/></svg>Save project as…</div>
+      <div class="fd-item fd-proj" onclick="checkSaveAs()"><svg viewBox="0 0 14 14"><path d="M1 1h9l3 3v9H1V1zm4 0v5h4V1M4 8h6v5H4V8"/></svg>Save this check as…</div>
+      <div class="fd-item fd-proj" onclick="printPack()"><svg viewBox="0 0 14 14"><path d="M3 1h8v3H3V1zm-2 4h12v5h-2v3H3v-3H1V5zm3 6h6v2H4v-2z"/></svg>Print whole pack…</div>
+      <div class="fd-item fd-proj" onclick="projectClose()"><svg viewBox="0 0 14 14"><path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" stroke-width="1.6" fill="none"/></svg>Close project</div>
+      <div class="fd-sep"></div>
       <div class="fd-item" onclick="exportWord()"><svg viewBox="0 0 14 14"><path d="M1 1h8l3 3v9H1V1zm3 5l1.5 4L7 6.5 8.5 10 10 6"/></svg>Export to Word…</div>
     </div>
   </div>
   <input type="file" id="openFileInput" accept=".perega" style="display:none" onchange="loadFile(this)">
+  <input type="file" id="openProjInput" accept=".peregaproj" style="display:none" onchange="loadProject(this)">
+  <input type="file" id="addCheckInput" accept=".perega" multiple style="display:none" onchange="addCheckFromFile(this)">
   <div class="sep"></div>
   <select class="tbsel" id="blockFmt" onchange="applyBlock(this.value)">
     <option value="p">Paragraph</option>
@@ -635,6 +700,20 @@ body{
   </div>
 </div>
 
+<!-- Project panel — only present while a pack is open -->
+<div class="proj-panel" id="projPanel">
+  <div class="proj-head">
+    <div class="proj-title" id="projName">Untitled project</div>
+    <div class="proj-sub" id="projCount">0 checks</div>
+  </div>
+  <div class="proj-list" id="projList"></div>
+  <div class="proj-foot">
+    <button class="proj-btn" onclick="projectAddNew()" title="Add a blank check">+ New check</button>
+    <button class="proj-btn" onclick="projectAddExisting()" title="Bring in a .perega file">Add existing…</button>
+    <button class="proj-btn proj-btn-print" onclick="printPack()" title="Print every check as one pack">Print pack</button>
+  </div>
+</div>
+
 <!-- Page stack -->
 <div class="page-stack" id="pageStack">
   <div class="page-wrap" id="pageWrap0">
@@ -784,10 +863,12 @@ body{
       <strong>Margins → Default</strong>
     </div>
     <div style="display:flex;gap:10px;justify-content:flex-end;">
-      <button onclick="document.getElementById('printWarning').style.display='none'"
+      <button onclick="document.getElementById('printWarning').style.display='none';clearPackPrint()"
         style="padding:7px 16px;border:1px solid #ddd;background:#fff;cursor:pointer;font-family:Arial,sans-serif;font-size:12px;border-radius:2px;">Cancel</button>
       <button onclick="document.getElementById('printWarning').style.display='none';window.print()"
         style="padding:7px 16px;background:#E50076;color:#fff;border:none;cursor:pointer;font-family:Arial,sans-serif;font-size:12px;font-weight:700;border-radius:2px;">Print now</button>
+      <!-- Cancel has to drop the assembled pack too, or it would sit in the
+           document and print on the next ordinary Print. -->
     </div>
   </div>
 </div>
@@ -2664,17 +2745,30 @@ function getPage2ContentHeight() {
 // Sheet field shows the page number.
 
 function buildMirrorHeader(pageIdx) {
-  const pageNum = pageIdx + 1; // 1-indexed page number
+  return buildHeaderFrom(null, String(pageIdx + 1), true);
+}
 
-  // Read current values from page 1
+// The header for any page, built from a meta object rather than the live page-1
+// inputs. buildMirrorHeader() passes null and reads the inputs, which is what
+// every page of the open document wants; a printed pack passes each check's
+// stored meta instead, because those inputs belong to whichever check happens
+// to be on screen.
+//
+// isMirror decides whether the header is tagged data-mirror-header. Only the
+// live document's headers may be: updateMirrorHeaders() re-renders every tagged
+// header from the page-1 inputs, and it searches the whole document, so a
+// tagged header inside a print pack would have another check's meta written
+// over it.
+function buildHeaderFrom(metaObj, sheetText, isMirror) {
   function v(id) {
+    if (metaObj) return metaObj[id] || '';
     const el = document.getElementById(id);
     return el ? el.value : '';
   }
 
   const hdr = document.createElement('div');
   hdr.className = 'pg-header';
-  hdr.dataset.mirrorHeader = '1';
+  if (isMirror) hdr.dataset.mirrorHeader = '1';
 
   // Title row
   const titleRow = document.createElement('div');
@@ -2710,8 +2804,8 @@ function buildMirrorHeader(pageIdx) {
   meta.appendChild(mc('Description:', 'span2'));
   meta.appendChild(mc(v('m-desc'), 'span2'));
   meta.appendChild(mc('Sheet:'));
-  // Sheet shows page number
-  const sheetCell = mc(String(pageNum));
+  // Sheet shows the page number — its position in the document, or in the pack
+  const sheetCell = mc(String(sheetText));
   sheetCell.dataset.sheetCell = '1';
   meta.appendChild(sheetCell);
   meta.appendChild(mc('Originator:'));
@@ -3195,6 +3289,9 @@ let _saveWarned = false;
 function autoSave() {
   clearTimeout(_autoSaveTimer);
   _autoSaveTimer = setTimeout(() => {
+    // In a pack it is the pack that has to survive a reload, not just whichever
+    // check happens to be on screen.
+    if (inProject()) { projectAutoSave(); return; }
     try {
       localStorage.setItem(LS_KEY, buildSaveData());
       if (_saveWarned) { _saveWarned = false; const el = document.getElementById('saveWarn'); if (el) el.classList.remove('show'); }
@@ -5200,17 +5297,489 @@ function restoreMeta(meta) {
   META_IDS.forEach(id => { const el = document.getElementById(id); if (el) el.value = (meta && meta[id]) || ''; });
 }
 
-function buildSaveData() {
-  const pages = [];
-  // Strip transient runtime markers so saved files stay clean and handlers
-  // re-attach on load; reflow + table formulas re-derive everything else.
-  getAllEditors().forEach((ed, i) => pages.push(
-    ed.innerHTML
+// The open document as a plain object: what a .perega holds, and what a project
+// stores per check. Transient runtime markers are stripped so saved content
+// stays clean and handlers re-attach on load; reflow and table formulas
+// re-derive everything else.
+function captureDoc() {
+  return {
+    version: 2,
+    meta: collectMeta(),
+    pages: getAllEditors().map(ed => ed.innerHTML
       .replace(/ data-reflow-split="1"/g, '')
-      .replace(/ data-tbl-handlers="1"/g, '')
-  ));
-  return JSON.stringify({ version:2, meta:collectMeta(), pages, preferredUnits, savedAt:new Date().toISOString() }, null, 2);
+      .replace(/ data-tbl-handlers="1"/g, '')),
+    preferredUnits: { ...preferredUnits },
+  };
 }
+
+// Put a captured document back on screen. Used by File ▸ Open, by switching
+// between the checks in a project, and by opening a project.
+function applyDoc(doc) {
+  removeExtraPages();
+  const pages = (doc && doc.pages && doc.pages.length) ? doc.pages : [''];
+  setEditorHtml(document.getElementById('editor'), pages[0]);
+  for (let i = 1; i < pages.length; i++) setEditorHtml(addPage(), pages[i]);
+  // Replace, not merge: merging let the previous document's choices leak into
+  // the one being opened.
+  preferredUnits = { ...DEFAULT_PREFERRED_UNITS, ...((doc && doc.preferredUnits) || {}) };
+  syncUnitPrefPanel();
+  restoreMeta((doc && doc.meta) || {});
+  updateMirrorHeaders();
+  reattachImageHandlers();
+  rebuildVars();
+  refreshAllTables();
+}
+
+function buildSaveData() {
+  return JSON.stringify({ ...captureDoc(), savedAt:new Date().toISOString() }, null, 2);
+}
+
+// ══ PROJECTS ═══════════════════════════════════════════════════
+// A project is a calculation pack: an ordered set of checks, each one a whole
+// document of its own, held together in a single .peregaproj file.
+//
+// The pack is self-contained — every check is stored inside it rather than
+// referenced on disk. A browser cannot hold a durable reference to a file
+// anyway, and an issued pack that opens completely on any machine is worth
+// more than one that depends on paths still being where it left them. A check
+// can still be taken out on its own at any time (Save this check as…), and a
+// standalone .perega can be brought in (Add existing check…).
+//
+// Only the check being edited is on screen. Switching captures the open one
+// back into the pack first, so nothing is lost by clicking away from it.
+
+const PROJ_EXT = '.peregaproj';
+const LS_PROJ  = 'calcpad_project_autosave';
+let project = null;          // null when working on a single document
+let projectFileName = 'Untitled project';
+let _projSeq = 0;
+const newCheckId = () => 'c' + (Date.now().toString(36)) + (_projSeq++).toString(36);
+
+function inProject() { return project !== null; }
+function activeCheck() {
+  return project && project.checks.find(c => c.id === project.activeId) || null;
+}
+
+// Fold whatever is on screen back into the check it belongs to. Every path that
+// leaves the current check goes through this.
+function stashActiveCheck() {
+  const c = activeCheck();
+  if (c) c.doc = captureDoc();
+}
+
+function projectData() {
+  stashActiveCheck();
+  return JSON.stringify({
+    kind: 'calcpad-project', version: 1,
+    name: project.name,
+    activeId: project.activeId,
+    checks: project.checks.map(c => ({ id: c.id, name: c.name, doc: c.doc })),
+    savedAt: new Date().toISOString(),
+  }, null, 2);
+}
+
+function projectAutoSave() {
+  if (!inProject()) return;
+  try { localStorage.setItem(LS_PROJ, projectData()); }
+  catch (e) {
+    // Same failure as a document autosave — usually embedded images filling
+    // the browser's storage. Saving to a file is unaffected.
+    const el = document.getElementById('saveWarn');
+    if (el) el.classList.add('show');
+  }
+}
+
+function setProjectTitle() {
+  document.title = inProject()
+    ? projectFileName + ' — CalcPad'
+    : (currentFileName + ' — CalcPad');
+}
+
+// ── Opening, creating, saving ──
+function projectNew() {
+  closeFileMenu();
+  if (isDirty && !confirm('Unsaved changes will be lost. Continue?')) return;
+  project = { name: 'Untitled project', checks: [], activeId: null };
+  projectFileName = 'Untitled project';
+  try { localStorage.removeItem(LS_KEY); } catch (e) {}
+  addCheck('Check 1', null, true);
+  isDirty = false;
+  setProjectTitle();
+}
+
+function projectOpen() {
+  closeFileMenu();
+  if (isDirty && !confirm('Unsaved changes will be lost. Continue?')) return;
+  document.getElementById('openProjInput').click();
+}
+
+function loadProject(input) {
+  const file = input.files[0];
+  input.value = '';
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!data || data.kind !== 'calcpad-project' || !Array.isArray(data.checks))
+        throw new Error('this is not a CalcPad project file');
+      project = {
+        name: data.name || 'Untitled project',
+        checks: data.checks.map(c => ({
+          id: c.id || newCheckId(),
+          name: c.name || 'Untitled check',
+          doc: c.doc || null,
+        })),
+        activeId: null,
+      };
+      // The file's own name is the pack's identity from here on — it is what
+      // the reader sees in the folder, and a stored name left over from a
+      // "Save as" under a different one would print in every footer.
+      projectFileName = file.name.replace(/\.peregaproj$/, '');
+      project.name = projectFileName;
+      if (!project.checks.length) addCheck('Check 1', null, true);
+      else openCheck(data.activeId && project.checks.some(c => c.id === data.activeId)
+        ? data.activeId : project.checks[0].id);
+      isDirty = false;
+      setProjectTitle();
+      renderProjectPanel();
+      projectAutoSave();
+    } catch (err) { alert('Could not open project: ' + err.message); }
+  };
+  reader.readAsText(file);
+}
+
+function projectSave() {
+  closeFileMenu();
+  if (!inProject()) return;
+  if (projectFileName === 'Untitled project') { projectSaveAs(); return; }
+  triggerDownload(projectData(), projectFileName + PROJ_EXT);
+  isDirty = false;
+}
+
+function projectSaveAs() {
+  closeFileMenu();
+  if (!inProject()) return;
+  const name = prompt('Project name:', projectFileName === 'Untitled project' ? '' : projectFileName);
+  if (name === null) return;
+  projectFileName = (name.trim() || 'Untitled project');
+  project.name = projectFileName;
+  triggerDownload(projectData(), projectFileName + PROJ_EXT);
+  isDirty = false;
+  setProjectTitle();
+  renderProjectPanel();
+}
+
+// Leave the pack and carry on with the check that is open as a single document.
+function projectClose() {
+  closeFileMenu();
+  if (!inProject()) return;
+  if (isDirty && !confirm('Unsaved changes to the project will be lost. Continue?')) return;
+  const c = activeCheck();
+  currentFileName = c ? c.name : 'Untitled';
+  project = null;
+  try { localStorage.removeItem(LS_PROJ); } catch (e) {}
+  isDirty = false;
+  setProjectTitle();
+  renderProjectPanel();
+  autoSave();
+}
+
+// ── The checks in a pack ──
+function addCheck(name, doc, makeActive) {
+  const c = { id: newCheckId(), name: name || ('Check ' + (project.checks.length + 1)), doc: doc || null };
+  project.checks.push(c);
+  if (makeActive || !project.activeId) openCheck(c.id);
+  else { renderProjectPanel(); isDirty = true; projectAutoSave(); }
+  return c;
+}
+
+function projectAddNew() {
+  if (!inProject()) return;
+  stashActiveCheck();
+  addCheck(null, blankDoc(), true);
+}
+
+function blankDoc() {
+  const meta = {};
+  META_IDS.forEach(id => { meta[id] = ''; });
+  // Carry the shared title-block fields across from the check being worked on:
+  // a pack belongs to one job, and retyping the project number per check is the
+  // sort of thing that ends up inconsistent.
+  const c = activeCheck();
+  if (c && c.doc && c.doc.meta) {
+    ['m-project', 'm-projno', 'm-desc', 'm-orig', 'm-deliv', 'm-suit', 'm-rev']
+      .forEach(k => { meta[k] = c.doc.meta[k] || ''; });
+  }
+  meta['m-date'] = new Date().toLocaleDateString('en-GB');
+  return { version: 2, meta, pages: [''], preferredUnits: { ...preferredUnits } };
+}
+
+function projectAddExisting() {
+  if (!inProject()) return;
+  document.getElementById('addCheckInput').click();
+}
+
+function addCheckFromFile(input) {
+  const files = Array.from(input.files || []);
+  input.value = '';
+  if (!files.length || !inProject()) return;
+  stashActiveCheck();
+  let pending = files.length, firstAdded = null;
+  files.forEach(file => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const data = JSON.parse(e.target.result);
+        const c = addCheck(file.name.replace(/\.perega$/, ''), {
+          version: 2,
+          meta: data.meta || {},
+          pages: data.pages || [data.content || ''],
+          preferredUnits: data.preferredUnits || { ...DEFAULT_PREFERRED_UNITS },
+        }, false);
+        if (!firstAdded) firstAdded = c.id;
+      } catch (err) { alert('Could not add ' + file.name + ': ' + err.message); }
+      if (--pending === 0 && firstAdded) openCheck(firstAdded);
+    };
+    reader.readAsText(file);
+  });
+}
+
+// Take the check that is open out of the pack as a standalone .perega. The copy
+// in the pack is untouched — the two are separate from that point on.
+function checkSaveAs() {
+  closeFileMenu();
+  const c = activeCheck();
+  if (!c) { fileSaveAs(); return; }
+  stashActiveCheck();
+  const name = prompt('Save this check as:', c.name);
+  if (name === null) return;
+  triggerDownload(JSON.stringify({ ...c.doc, savedAt: new Date().toISOString() }, null, 2),
+                  (name.trim() || c.name) + '.perega');
+}
+
+function openCheck(id) {
+  if (!inProject()) return;
+  if (id === project.activeId) return;
+  stashActiveCheck();
+  const c = project.checks.find(x => x.id === id);
+  if (!c) return;
+  project.activeId = id;
+  applyDoc(c.doc || blankDoc());
+  if (!c.doc) c.doc = captureDoc();
+  setProjectTitle();
+  renderProjectPanel();
+  projectAutoSave();
+}
+
+function renameCheck(id) {
+  const c = project && project.checks.find(x => x.id === id);
+  if (!c) return;
+  const name = prompt('Name of this check:', c.name);
+  if (name === null) return;
+  c.name = name.trim() || c.name;
+  isDirty = true;
+  renderProjectPanel();
+  projectAutoSave();
+}
+
+function removeCheck(id) {
+  if (!inProject()) return;
+  const i = project.checks.findIndex(x => x.id === id);
+  if (i === -1) return;
+  const c = project.checks[i];
+  if (!confirm('Remove "' + c.name + '" from the project?\n\nIt is deleted from the pack. If you want to keep it, cancel and use “Save this check as…” first.')) return;
+  const wasActive = project.activeId === id;
+  project.checks.splice(i, 1);
+  if (!project.checks.length) { addCheck('Check 1', blankDoc(), true); return; }
+  if (wasActive) {
+    // The active check is gone, so nothing on screen belongs to the pack any
+    // more — clear activeId before opening, or openCheck would stash the
+    // removed check's content into whichever one it lands on.
+    project.activeId = null;
+    openCheck(project.checks[Math.min(i, project.checks.length - 1)].id);
+  } else { renderProjectPanel(); }
+  isDirty = true;
+  projectAutoSave();
+}
+
+function moveCheck(id, dir) {
+  if (!inProject()) return;
+  const i = project.checks.findIndex(x => x.id === id);
+  const j = i + dir;
+  if (i === -1 || j < 0 || j >= project.checks.length) return;
+  const [c] = project.checks.splice(i, 1);
+  project.checks.splice(j, 0, c);
+  isDirty = true;
+  renderProjectPanel();
+  projectAutoSave();
+}
+
+// ── The panel ──
+function renderProjectPanel() {
+  const panel = document.getElementById('projPanel');
+  if (!panel) return;
+  document.body.classList.toggle('has-project', inProject());
+  if (!inProject()) { panel.classList.remove('open'); return; }
+  panel.classList.add('open');
+  document.getElementById('projName').textContent = project.name;
+
+  const list = document.getElementById('projList');
+  list.textContent = '';
+  project.checks.forEach((c, i) => {
+    const row = document.createElement('div');
+    row.className = 'proj-item' + (c.id === project.activeId ? ' on' : '');
+    row.title = c.name;
+
+    const num = document.createElement('span');
+    num.className = 'proj-num';
+    num.textContent = String(i + 1);
+    row.appendChild(num);
+
+    const nm = document.createElement('span');
+    nm.className = 'proj-name';
+    nm.textContent = c.name;
+    nm.onclick = () => openCheck(c.id);
+    row.appendChild(nm);
+
+    const acts = document.createElement('span');
+    acts.className = 'proj-acts';
+    const btn = (label, title, fn, disabled) => {
+      const b = document.createElement('button');
+      b.className = 'proj-act';
+      b.textContent = label;
+      b.title = title;
+      b.disabled = !!disabled;
+      b.onclick = e => { e.stopPropagation(); fn(); };
+      return b;
+    };
+    acts.appendChild(btn('↑', 'Move up',   () => moveCheck(c.id, -1), i === 0));
+    acts.appendChild(btn('↓', 'Move down', () => moveCheck(c.id,  1), i === project.checks.length - 1));
+    acts.appendChild(btn('✎', 'Rename',    () => renameCheck(c.id)));
+    acts.appendChild(btn('✕', 'Remove from project', () => removeCheck(c.id)));
+    row.appendChild(acts);
+
+    list.appendChild(row);
+  });
+
+  document.getElementById('projCount').textContent =
+    project.checks.length + (project.checks.length === 1 ? ' check' : ' checks');
+}
+
+// ── Printing the whole pack ──
+// Built as a separate DOM alongside the live pages rather than by rewriting
+// them: the document on screen is never touched, so there is nothing to restore
+// if printing is cancelled, and a check that is not open still prints from what
+// the pack stored for it.
+function buildPackPrint() {
+  const root = document.createElement('div');
+  root.className = 'pack-print';
+
+  const firstMeta = (project.checks[0] && project.checks[0].doc && project.checks[0].doc.meta) || {};
+
+  // Work out where each check starts before drawing anything, so the contents
+  // page can carry real sheet numbers.
+  let sheet = 1;
+  const starts = project.checks.map(c => {
+    const at = sheet;
+    sheet += Math.max(1, ((c.doc && c.doc.pages) || ['']).length);
+    return at;
+  });
+
+  // ── Contents ──
+  const cWrap = document.createElement('div');
+  cWrap.className = 'page-wrap';
+  const cPage = document.createElement('div');
+  cPage.className = 'a4-page';
+  cPage.appendChild(buildHeaderFrom(firstMeta, 'C', false));
+  const cCont = document.createElement('div');
+  cCont.className = 'pg-content';
+  const cInner = document.createElement('div');
+  cInner.className = 'calc-area';
+  const h = document.createElement('div');
+  h.className = 'pack-contents-title';
+  h.textContent = 'Contents';
+  cInner.appendChild(h);
+  project.checks.forEach((c, i) => {
+    const row = document.createElement('div');
+    row.className = 'pack-toc-row';
+    const nm = document.createElement('span');
+    nm.className = 'pack-toc-name';
+    nm.textContent = (i + 1) + '.  ' + c.name;
+    const dots = document.createElement('span');
+    dots.className = 'pack-toc-dots';
+    const pg = document.createElement('span');
+    pg.className = 'pack-toc-page';
+    pg.textContent = String(starts[i]);
+    row.appendChild(nm); row.appendChild(dots); row.appendChild(pg);
+    cInner.appendChild(row);
+  });
+  cCont.appendChild(cInner);
+  cPage.appendChild(cCont);
+  const cFtr = document.createElement('div');
+  cFtr.className = 'pg-footer';
+  cFtr.textContent = project.name;
+  cPage.appendChild(cFtr);
+  cWrap.appendChild(cPage);
+  root.appendChild(cWrap);
+
+  // ── Every check, in order, numbered continuously ──
+  project.checks.forEach((c, ci) => {
+    const doc = c.doc || { meta: {}, pages: [''] };
+    const pages = (doc.pages && doc.pages.length) ? doc.pages : [''];
+    pages.forEach((html, pi) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'page-wrap';
+      const page = document.createElement('div');
+      page.className = 'a4-page';
+      page.appendChild(buildHeaderFrom(doc.meta || {}, String(starts[ci] + pi), false));
+      const cont = document.createElement('div');
+      cont.className = 'pg-content';
+      const area = document.createElement('div');
+      area.className = 'calc-area';
+      // Saved page HTML is untrusted in exactly the way a loaded document is,
+      // so it goes through the same sanitiser rather than straight to innerHTML.
+      area.appendChild(sanitisePastedChunk(String(html == null ? '' : html)));
+      cont.appendChild(area);
+      page.appendChild(cont);
+      const ftr = document.createElement('div');
+      ftr.className = 'pg-footer';
+      ftr.textContent = project.name + ' — ' + c.name;
+      page.appendChild(ftr);
+      wrap.appendChild(page);
+      root.appendChild(wrap);
+    });
+  });
+
+  return root;
+}
+
+let _packPrintNode = null;
+function clearPackPrint() {
+  if (_packPrintNode) { _packPrintNode.remove(); _packPrintNode = null; }
+  document.body.classList.remove('printing-pack');
+}
+
+function printPack() {
+  closeFileMenu();
+  if (!inProject()) { triggerPrint(); return; }
+  stashActiveCheck();
+  if (!project.checks.length) return;
+  clearPackPrint();
+  _packPrintNode = buildPackPrint();
+  document.body.appendChild(_packPrintNode);
+  document.body.classList.add('printing-pack');
+  const go = () => { window.print(); };
+  if (_isIOS) go();
+  else {
+    const w = document.getElementById('printWarning');
+    w.dataset.pack = '1';
+    w.style.display = 'flex';
+  }
+}
+// The pack DOM is only needed while the print dialog is up; afterprint fires
+// whether the user printed or cancelled.
+window.addEventListener('afterprint', clearPackPrint);
 
 // ── Bug reporting ──────────────────────────────────────────────
 function openBugReport() {
@@ -5266,7 +5835,9 @@ function triggerDownload(data, filename) {
 }
 function fileNew() {
   closeFileMenu();
-  if (isDirty && !confirm('Unsaved changes will be lost. Continue?')) return;
+  if (inProject() && !confirm('This closes the project and starts a single blank document. Continue?')) return;
+  if (isDirty && !inProject() && !confirm('Unsaved changes will be lost. Continue?')) return;
+  if (inProject()) { project = null; try { localStorage.removeItem(LS_PROJ); } catch (e) {} renderProjectPanel(); }
   getAllEditors().forEach(ed => { ed.innerHTML = ''; });
   removeExtraPages();
   restoreMeta({}); document.getElementById('m-date').value = new Date().toLocaleDateString('en-GB');
@@ -5290,26 +5861,10 @@ function loadFile(input) {
   reader.onload = e => {
     try {
       const data = JSON.parse(e.target.result);
-      removeExtraPages();
-      const pages = data.pages || [data.content || ''];
-      // Set page 1 content
-      setEditorHtml(document.getElementById('editor'), pages[0]);
-      // Add additional pages
-      for (let i = 1; i < pages.length; i++) {
-        const newEd = addPage();
-        setEditorHtml(newEd, pages[i]);
-      }
-      // Replace, not merge: merging let the previous document's choices leak
-      // into the one being opened.
-      preferredUnits = { ...DEFAULT_PREFERRED_UNITS, ...(data.preferredUnits || {}) };
-      syncUnitPrefPanel();
-      restoreMeta(data.meta || {});
-      updateMirrorHeaders();
+      applyDoc({ pages: data.pages || [data.content || ''],
+                 meta: data.meta, preferredUnits: data.preferredUnits });
       currentFileName = file.name.replace(/\.perega$/, '');
       isDirty = false; document.title = currentFileName + ' — CalcPad';
-      reattachImageHandlers();
-      rebuildVars();
-      refreshAllTables();
     } catch(err) { alert('Could not open file: ' + err.message); }
   };
   reader.readAsText(file); input.value = '';
@@ -5492,6 +6047,7 @@ if (_isIOS) document.documentElement.classList.add('ios-print');
 
 
 function triggerPrint() {
+  clearPackPrint();   // the toolbar button always prints what is on screen
   if (_isIOS) { window.print(); return; }
   document.getElementById('printWarning').style.display = 'flex';
 }
@@ -5502,10 +6058,36 @@ function triggerPrint() {
 // the deferred KaTeX has executed by now — otherwise the first render of every
 // chip would fall back to plain text. Everything above only defines functions
 // and attaches listeners, so none of it needs KaTeX at parse time.
+// Restore an autosaved pack. Checked before the single-document autosave: if
+// someone was last working in a pack, that is what they expect back.
+function loadProjectFromLocalStorage() {
+  let raw = null;
+  try { raw = localStorage.getItem(LS_PROJ); } catch (e) { return false; }
+  if (!raw) return false;
+  try {
+    const data = JSON.parse(raw);
+    if (!data || data.kind !== 'calcpad-project' || !Array.isArray(data.checks) || !data.checks.length)
+      return false;
+    project = {
+      name: data.name || 'Untitled project',
+      checks: data.checks.map(c => ({ id: c.id || newCheckId(), name: c.name || 'Untitled check', doc: c.doc || null })),
+      activeId: null,
+    };
+    projectFileName = project.name;
+    openCheck(data.activeId && project.checks.some(c => c.id === data.activeId)
+      ? data.activeId : project.checks[0].id);
+    isDirty = false;
+    setProjectTitle();
+    renderProjectPanel();
+    return true;
+  } catch (e) { return false; }
+}
+
 function bootstrap() {
-  loadFromLocalStorage();
+  if (!loadProjectFromLocalStorage()) loadFromLocalStorage();
   rebuildVars();
   refreshAllTables();
+  renderProjectPanel();
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootstrap);
 else bootstrap();
