@@ -70,11 +70,83 @@ function setKey(k) {
 
 /* ── Reading the document ──────────────────────────────────────────── */
 
-// chunkPlainText() is the core app's own serialiser — the one behind copy and
-// Word export — so what the model reviews is exactly what a reader sees:
-// chips come through as "M_Ed = w*L^2/8 = 45 kN·m", not as markup.
+// The text of one run, chips resolved the way a reader sees them —
+// "M_Ed = w*L^2/8 = 45 kN·m" rather than markup.
+function inlineOf(node) {
+  let s = '';
+  (function w(n) {
+    if (n.nodeType === Node.TEXT_NODE) { s += n.nodeValue; return; }
+    if (n.nodeType !== Node.ELEMENT_NODE) return;
+    if (n.classList && n.classList.contains('var-def-chip')) { s += varChipExportText(n); return; }
+    if (n.classList && n.classList.contains('formula-chip')) { s += formulaChipExportText(n); return; }
+    if (n.tagName === 'BR') { s += ' '; return; }
+    for (const c of n.childNodes) w(c);
+  })(node);
+  return s.replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function tableLines(table) {
+  const out = ['[table]'];
+  Array.from(table.rows).forEach((row, i) => {
+    const cells = Array.from(row.cells).map(c => inlineOf(c));
+    out.push('| ' + cells.join(' | ') + ' |');
+    if (i === 0) out.push('|' + cells.map(() => '---').join('|') + '|');
+  });
+  return out;
+}
+
+// chunkPlainText() — the app's own serialiser, behind copy and Word export —
+// flattens the document to a wall of sentences: a heading arrives looking
+// exactly like a paragraph and list items lose their markers. For a reader
+// that is fine, because the page still shows the difference. For a model
+// reading the sheet to work out what is being designed, the structure IS the
+// argument, so headings, lists and tables are marked here instead.
+function structuredText(root) {
+  const lines = [];
+  let buf = '';
+  const flush = () => {
+    const t = buf.replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
+    if (t) lines.push(t);
+    buf = '';
+  };
+  const BLOCK = /^(P|DIV|UL|OL|TABLE|BLOCKQUOTE)$/;
+  (function walk(node) {
+    for (const n of node.childNodes) {
+      if (n.nodeType === Node.TEXT_NODE) { buf += n.nodeValue; continue; }
+      if (n.nodeType !== Node.ELEMENT_NODE) continue;
+      const tag = n.tagName;
+      if (tag === 'BR') { flush(); continue; }
+      if (n.classList && n.classList.contains('var-def-chip'))  { buf += varChipExportText(n); continue; }
+      if (n.classList && n.classList.contains('formula-chip'))  { buf += formulaChipExportText(n); continue; }
+      if (n.classList && n.classList.contains('calc-img-wrap')) { flush(); lines.push('[image]'); continue; }
+      if (/^H[1-4]$/.test(tag)) { flush(); const t = inlineOf(n); if (t) lines.push('#'.repeat(+tag[1]) + ' ' + t); continue; }
+      if (tag === 'LI')    { flush(); const t = inlineOf(n); if (t) lines.push('- ' + t); continue; }
+      if (tag === 'TABLE') { flush(); tableLines(n).forEach(l => lines.push(l)); continue; }
+      if (BLOCK.test(tag)) { flush(); walk(n); flush(); continue; }
+      buf += inlineOf(n);
+    }
+  })(root);
+  flush();
+  return lines.join('\n');
+}
+
 function pageTexts() {
-  return getAllEditors().map(ed => chunkPlainText(ed));
+  return getAllEditors().map(ed => structuredText(ed));
+}
+
+// Which section each variable sits under. querySelectorAll returns document
+// order, so one pass carries the current heading down onto the chips beneath
+// it — an f_ck under "Slab" is not the f_ck under "Transfer beam".
+function sectionMap() {
+  const map = new Map();
+  getAllEditors().forEach(ed => {
+    let current = '';
+    ed.querySelectorAll('h1,h2,h3,h4,.var-def-chip').forEach(n => {
+      if (n.classList && n.classList.contains('var-def-chip')) map.set(n, current);
+      else current = inlineOf(n);
+    });
+  });
+  return map;
 }
 
 function documentIsEmpty() {
@@ -153,14 +225,17 @@ const DIMENSION_NAMES = {
 function variableInventory() {
   const chips = Array.from(document.querySelectorAll('.var-def-chip'));
   if (!chips.length) return '(no variables defined yet)';
+  const sections = sectionMap();
   return chips.map(c => {
     const name = c.dataset.varName || '?';
     const si   = (typeof varUnits !== 'undefined' && varUnits[name]) || '';
     const dim  = si ? (DIMENSION_NAMES[si] || si) : 'dimensionless — no unit was given';
     const label = chipLabel(c);
+    const sect  = sections.get(c) || '';
     return '  ' + varChipExportText(c) +
            '   [' + dim + ']' +
-           (label ? '   labelled in the sheet as: "' + label + '"' : '');
+           (label ? '   labelled in the sheet as: "' + label + '"' : '') +
+           (sect  ? '   under the heading: "' + sect + '"' : '');
   }).join('\n');
 }
 
@@ -509,6 +584,11 @@ const QA_SYSTEM = [
   'used, or a symbol used in prose that is never defined; and obvious gaps such as a',
   'load case, a check, or a code reference that the document implies but does not carry.',
   '',
+  'The document is given with its structure marked: "#", "##" and "###" are headings,',
+  '"-" a list item, and a table appears as [table] followed by its rows. Judge the',
+  'flow against that structure — a section that never gets a heading, a heading with',
+  'nothing under it, or a result that sits outside the section it belongs to.',
+  '',
   'CalcPad notation, so you do not mistake it for an error:',
   '  "L = 6 m"                 a variable definition with its unit',
   '  "M = w*L^2/8 = 45 kN·m"   a definition, its expression, and the computed value',
@@ -749,11 +829,28 @@ const CHAT_SYSTEM = [
   '',
   'READ THE SHEET BEFORE YOU WRITE ANYTHING',
   '',
+  'The prose is the brief. The sentences and headings around the numbers are what the',
+  'calculation is for, and they are usually the only place the intent is written down.',
+  'Read them first and let them tell you what is being designed, to which code and',
+  'revision, which load cases and combinations apply and which governs, what has',
+  'already been decided and what is still open, and what each symbol means here.',
+  '',
+  'The document is given with its structure marked: "#", "##" and "###" are headings,',
+  '"-" a list item, and a table appears as [table] followed by its rows. Read a',
+  'variable as belonging to the section it sits under — an f_ck under "Slab" is not',
+  'the f_ck under "Transfer beam" — and read a heading as the subject of everything',
+  'beneath it until the next one.',
+  '',
   'You are given every variable already defined, with its value, the dimension it',
-  'carries, and the words written beside it in the sheet. Work out what each one is',
-  'before you draft. Symbols follow Eurocode convention unless the sheet says',
-  'otherwise: f_ck is a cylinder strength, V_Ed a design shear, b_w a web width,',
+  'carries, the words written beside it, and the heading it sits under. Work out what',
+  'each one is before you draft. Symbols follow Eurocode convention unless the sheet',
+  'says otherwise: f_ck is a cylinder strength, V_Ed a design shear, b_w a web width,',
   'gamma_c a partial factor on concrete.',
+  '',
+  'Where the sheet\'s own words disagree with that convention, the sheet wins. If it',
+  'says b_w is the width of both webs together, that is what b_w is here, whatever',
+  'EC2 means by it — use it as the sheet defines it, and say that you noticed the',
+  'conflict rather than quietly correcting it.',
   '',
   'When asked for a named check — "do a shear check to EC2" — the loading and the',
   'material properties are usually already on the sheet. Find them and use them.',
