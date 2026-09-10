@@ -714,6 +714,35 @@ body.has-project{padding-left:230px}
   </div>
 </div>
 
+<!-- Shown when Save / Save as is used with a project open. Those commands write
+     a single .perega, which in a pack means one check and not the pack — the
+     sort of thing you only notice when you reopen the job. -->
+<div id="saveScopeModal" style="display:none;position:fixed;inset:0;z-index:9200;
+  background:rgba(0,0,0,.4);align-items:center;justify-content:center;font-family:Arial,sans-serif">
+  <div style="background:#fff;border-radius:6px;border-top:4px solid var(--golden);padding:18px 20px;
+    width:400px;max-width:92vw;box-shadow:0 4px 24px rgba(0,0,0,.25)">
+    <div style="font-size:13px;font-weight:700;margin-bottom:8px;color:#1a1a1a">This would not save the project</div>
+    <div style="font-size:11.5px;color:#505050;line-height:1.65;margin-bottom:14px" id="saveScopeText"></div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button onclick="saveScopeChoose('project')"
+        style="padding:8px 12px;border:none;border-radius:4px;background:var(--rubine);color:#fff;
+          cursor:pointer;font-size:12px;font-weight:700;text-align:left;font-family:Arial,sans-serif">
+        Save the whole project
+        <div style="font-weight:400;font-size:10.5px;opacity:.9;margin-top:2px" id="saveScopeProjHint"></div>
+      </button>
+      <button onclick="saveScopeChoose('check')"
+        style="padding:8px 12px;border:1px solid #ddd;border-radius:4px;background:#fff;color:#1a1a1a;
+          cursor:pointer;font-size:12px;font-weight:700;text-align:left;font-family:Arial,sans-serif">
+        Save only this check
+        <div style="font-weight:400;font-size:10.5px;color:#777;margin-top:2px" id="saveScopeCheckHint"></div>
+      </button>
+      <button onclick="saveScopeChoose(null)"
+        style="padding:5px 14px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer;
+          font-size:12px;align-self:flex-end;margin-top:4px;font-family:Arial,sans-serif">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- Page stack -->
 <div class="page-stack" id="pageStack">
   <div class="page-wrap" id="pageWrap0">
@@ -5846,9 +5875,45 @@ function fileNew() {
   try { localStorage.removeItem(LS_KEY); } catch(e) {}
   rebuildVars();
 }
-function fileSave() { closeFileMenu(); if (currentFileName === 'Untitled') { fileSaveAs(); return; } triggerDownload(buildSaveData(), currentFileName + '.perega'); isDirty = false; }
+// Save and Save as write one .perega. With a pack open that is one check, not
+// the pack — and the two look identical afterwards until the job is reopened
+// and the other checks are missing. Rather than a warning that only says no,
+// offer the thing that was probably meant.
+let _saveScopeKind = null;
+function askSaveScope(kind) {
+  const c = activeCheck();
+  _saveScopeKind = kind;
+  document.getElementById('saveScopeText').innerHTML =
+    '<b>' + escHtml(project.name) + '</b> is open, with ' + project.checks.length +
+    (project.checks.length === 1 ? ' check' : ' checks') + '. ' +
+    'Save and Save as write a single <code>.perega</code>, which here means only ' +
+    '<b>' + escHtml(c ? c.name : 'the open check') + '</b> — the rest of the pack would not be in it.';
+  document.getElementById('saveScopeProjHint').textContent =
+    'Writes ' + project.name + '.peregaproj with all ' + project.checks.length + '.';
+  document.getElementById('saveScopeCheckHint').textContent =
+    'Writes a standalone .perega of ' + (c ? c.name : 'the open check') +
+    '. The copy in the pack is untouched, and the two are separate from then on.';
+  document.getElementById('saveScopeModal').style.display = 'flex';
+}
+
+function saveScopeChoose(choice) {
+  document.getElementById('saveScopeModal').style.display = 'none';
+  const kind = _saveScopeKind;
+  _saveScopeKind = null;
+  if (choice === 'project') { kind === 'saveas' ? projectSaveAs() : projectSave(); }
+  else if (choice === 'check') { checkSaveAs(); }
+}
+
+function fileSave() {
+  closeFileMenu();
+  if (inProject()) { askSaveScope('save'); return; }
+  if (currentFileName === 'Untitled') { fileSaveAs(); return; }
+  triggerDownload(buildSaveData(), currentFileName + '.perega');
+  isDirty = false;
+}
 function fileSaveAs() {
   closeFileMenu();
+  if (inProject()) { askSaveScope('saveas'); return; }
   let name = prompt('Save as:', currentFileName); if (name === null) return;
   currentFileName = name.replace(/\.perega$/, '') || 'Untitled';
   triggerDownload(buildSaveData(), currentFileName + '.perega'); isDirty = false;
