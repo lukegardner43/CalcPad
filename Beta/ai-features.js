@@ -114,12 +114,70 @@ function metaText() {
   return rows.length ? rows.join('\n') : '(title block not filled in)';
 }
 
-// Every live definition, in document order, with its computed value in the
-// units actually shown on screen.
-function variableTable() {
+// The words written immediately before a chip on its own line — "Concrete
+// cylinder strength f_ck = 30 MPa" carries far more meaning than "f_ck = 30
+// MPa", and that prefix is a plain text node the variable table would drop.
+function chipLabel(chip) {
+  let out = '';
+  for (let n = chip.previousSibling; n; n = n.previousSibling) {
+    if (n.nodeType === Node.ELEMENT_NODE) {
+      if (n.tagName === 'BR') break;
+      if (n.classList && (n.classList.contains('var-def-chip') ||
+                          n.classList.contains('formula-chip'))) break;
+      out = n.textContent + out;
+      continue;
+    }
+    if (n.nodeType === Node.TEXT_NODE) {
+      const nl = n.textContent.lastIndexOf('\n');
+      if (nl !== -1) { out = n.textContent.slice(nl + 1) + out; break; }
+      out = n.textContent + out;
+    }
+  }
+  // A semicolon-joined line puts "; " (and any label) in one node between the
+  // chips, so the separator has to come off the front.
+  return out.replace(/^[\s\u00A0;]+/, '').replace(/[\s\u00A0;]+$/, '').trim();
+}
+
+// What kind of quantity an SI unit string represents. Naming the dimension
+// lets the model tell a stress from a line load without inferring it from the
+// symbol alone, which is how a section modulus gets mistaken for a volume.
+const DIMENSION_NAMES = {
+  'm': 'length', 'm^2': 'area', 'm^3': 'volume or section modulus',
+  'm^4': 'second moment of area', 'N': 'force', 'N·m': 'moment',
+  'N/m': 'load per unit length', 'N/m^2': 'pressure or stress', 'Pa': 'stress or pressure',
+  'kg': 'mass', 'kg/m^3': 'density', 's': 'time', 'rad': 'angle',
+};
+
+// Every live definition, in document order: the label it was given, the value
+// as shown on screen, and the dimension it carries.
+function variableInventory() {
   const chips = Array.from(document.querySelectorAll('.var-def-chip'));
-  if (!chips.length) return '(no variables defined)';
-  return chips.map(c => '  ' + varChipExportText(c)).join('\n');
+  if (!chips.length) return '(no variables defined yet)';
+  return chips.map(c => {
+    const name = c.dataset.varName || '?';
+    const si   = (typeof varUnits !== 'undefined' && varUnits[name]) || '';
+    const dim  = si ? (DIMENSION_NAMES[si] || si) : 'dimensionless — no unit was given';
+    const label = chipLabel(c);
+    return '  ' + varChipExportText(c) +
+           '   [' + dim + ']' +
+           (label ? '   labelled in the sheet as: "' + label + '"' : '');
+  }).join('\n');
+}
+
+// Names a formula refers to that nothing defines. The sheet shows these as
+// errors, but saying so plainly stops the model proposing work that builds on
+// a quantity which is not actually there.
+function undefinedSymbols() {
+  const defined = new Set(Array.from(document.querySelectorAll('.var-def-chip'))
+    .map(c => c.dataset.varName).filter(Boolean));
+  const missing = new Set();
+  document.querySelectorAll('.formula-chip').forEach(c => {
+    const f = c.dataset.formula;
+    if (!f) return;
+    try { usedVars(f).forEach(n => { if (!defined.has(n)) missing.add(n); }); }
+    catch (e) { /* an unparseable formula tells us nothing here */ }
+  });
+  return missing.size ? Array.from(missing).join(', ') : '';
 }
 
 function preferredUnitsText() {
@@ -136,8 +194,11 @@ function documentContext(numbered) {
     'DEFAULT OUTPUT UNITS',
     preferredUnitsText(),
     '',
-    'VARIABLES CURRENTLY DEFINED (name = expression = computed value)',
-    variableTable(),
+    'VARIABLES CURRENTLY DEFINED (name = expression = value, dimension, label)',
+    variableInventory(),
+    '',
+    'SYMBOLS USED BUT NOT DEFINED',
+    undefinedSymbols() || '(none)',
     '',
     'DOCUMENT',
     numbered ? numberedDocument() : plainDocument(),
@@ -686,14 +747,56 @@ const CHAT_SYSTEM = [
   'basis. After it, note any assumption you had to make and anything the engineer must',
   'check or confirm. Where a design code governs, name the clause.',
   '',
-  'You can see the current state of the sheet, including every variable already',
-  'defined. Build on it: reuse those variables rather than redefining them, follow the',
-  'symbols and units already in use, and continue from where the document has got to.',
+  'READ THE SHEET BEFORE YOU WRITE ANYTHING',
   '',
-  'If the request is ambiguous in a way that changes the answer — the code, the exposure',
-  'class, the support conditions — state the assumption you are making and carry on.',
-  'Ask a question only when no reasonable assumption is available. Never present a',
-  'result as checked or compliant; you are drafting, the engineer is responsible.',
+  'You are given every variable already defined, with its value, the dimension it',
+  'carries, and the words written beside it in the sheet. Work out what each one is',
+  'before you draft. Symbols follow Eurocode convention unless the sheet says',
+  'otherwise: f_ck is a cylinder strength, V_Ed a design shear, b_w a web width,',
+  'gamma_c a partial factor on concrete.',
+  '',
+  'When asked for a named check — "do a shear check to EC2" — the loading and the',
+  'material properties are usually already on the sheet. Find them and use them.',
+  'Open your reply by naming the variables you are taking, and what you have read each',
+  'one to be, so the engineer can see at a glance whether you picked the right ones:',
+  '',
+  '  Working from f_ck = 30 MPa (cylinder strength), b_w = 250 mm (web width) and',
+  '  V_Ed = 145 kN (design shear at the support).',
+  '',
+  'Never introduce a second name for a quantity the sheet already has. If the sheet',
+  'defines b_w, use b_w — do not define b. Follow the units and symbols already in use.',
+  '',
+  'ASK WHEN IT MATTERS',
+  '',
+  'Ask before drafting when:',
+  '  - a quantity the check needs is not on the sheet and you cannot infer it;',
+  '  - two variables could each be the one you need, and choosing wrong changes the',
+  '    answer;',
+  '  - something already on the sheet looks wrong or incomplete for the check being',
+  '    asked for — a strength carrying no units, a value an order of magnitude away',
+  '    from what its symbol implies, a partial factor that does not match the code',
+  '    named, a symbol used but never defined.',
+  '',
+  'To ask, use a fenced block tagged ask, one question per line, with the likely',
+  'answers after a "|". The engineer answers them in the panel and the answers come',
+  'back to you:',
+  '',
+  '```ask',
+  'Which shear reinforcement arrangement? | Vertical links | Bent-up bars',
+  'Is the section cracked in flexure?',
+  'f_ck = 30 is defined without units — is that 30 MPa? | Yes, 30 MPa | No, I will fix it',
+  '```',
+  '',
+  'Ask only what you actually need — more than three questions at once is too many,',
+  'and asking for something the sheet already answers is worse than not asking. When',
+  'everything you need is there, do not ask: draft it. When you ask, ask first and',
+  'wait — do not put an ask block and a calcpad block in the same reply.',
+  '',
+  'Where an assumption is reasonable and does not change the answer much, make it and',
+  'say so in words rather than asking. Never take a quantity silently.',
+  '',
+  'Never present a result as checked or compliant; you are drafting, the engineer is',
+  'responsible.',
 ].join('\n');
 
 function chatContextBlock() {
@@ -858,9 +961,81 @@ function renderProse(host, text) {
   flushPara();
 }
 
+// A block tagged "ask" becomes a small form rather than a wall of prose: one
+// row per question, the model's likely answers as buttons, and a box for
+// anything else. Answering is then a couple of clicks instead of retyping the
+// question back in words.
+function renderQuestions(host, text) {
+  const rows = String(text).split('\n').map(l => l.trim()).filter(Boolean);
+  if (!rows.length) return;
+
+  const box = el('div', 'ai-ask');
+  const head = el('div', 'ai-ask-head');
+  head.appendChild(el('span', 'ai-ask-tag', 'Before drafting, it needs to know'));
+  box.appendChild(head);
+
+  const answers = [];
+  rows.forEach(row => {
+    const bits = row.split('|').map(s => s.trim());
+    const q = bits.shift();
+    const item = el('div', 'ai-ask-q');
+    item.appendChild(el('div', 'ai-ask-label', q));
+
+    const state = { q, picked: null, input: null };
+    if (bits.length) {
+      const opts = el('div', 'ai-ask-opts');
+      bits.forEach(o => {
+        const btn = el('button', 'ai-ask-opt', o);
+        btn.onclick = () => {
+          const already = btn.classList.contains('on');
+          opts.querySelectorAll('.ai-ask-opt').forEach(x => x.classList.remove('on'));
+          if (already) { state.picked = null; return; }
+          btn.classList.add('on');
+          state.picked = o;
+          if (state.input) state.input.value = '';
+        };
+        opts.appendChild(btn);
+      });
+      item.appendChild(opts);
+    }
+
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.className = 'ai-ask-input';
+    inp.placeholder = bits.length ? 'or type your own answer…' : 'your answer…';
+    inp.oninput = () => {
+      if (!inp.value) return;
+      item.querySelectorAll('.ai-ask-opt').forEach(x => x.classList.remove('on'));
+      state.picked = null;
+    };
+    state.input = inp;
+    item.appendChild(inp);
+
+    answers.push(state);
+    box.appendChild(item);
+  });
+
+  const send = el('button', 'ai-btn ai-ask-send', 'Send answers');
+  send.onclick = () => {
+    const lines = answers
+      .map(a => { const v = (a.input.value || '').trim() || a.picked; return v ? a.q + ' — ' + v : null; })
+      .filter(Boolean);
+    if (!lines.length) { send.textContent = 'Answer at least one first'; setTimeout(() => { send.textContent = 'Send answers'; }, 1600); return; }
+    // Lock the form: the answers are now part of the conversation, and a second
+    // send would ask the model to act on the same questions twice.
+    box.querySelectorAll('button, input').forEach(n => { n.disabled = true; });
+    box.classList.add('answered');
+    $('aiChatInput').value = 'Answers to your questions:\n' + lines.join('\n');
+    sendChat();
+  };
+  box.appendChild(send);
+  host.appendChild(box);
+}
+
 function renderCode(host, code, lang) {
   const text = String(code).replace(/\n+$/, '');
   if (!text.trim()) return;
+  if (lang === 'ask') { renderQuestions(host, text); return; }
   const isCalc = lang === 'calcpad' || lang === 'calc';
 
   const box = el('div', 'ai-code');

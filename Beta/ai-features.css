@@ -194,3 +194,22 @@
 @media print{
   .ai-panel,.ai-overlay,.ai-tbtn,.ai-hl,.ai-beta-pill{display:none!important}
 }
+
+/* ── Questions the assistant asks back ── */
+.ai-ask{border:1px solid var(--ai-line);border-left:3px solid var(--golden,#F9B000);
+  border-radius:3px;background:#fffdf6;margin:8px 0;padding:9px 11px}
+.ai-ask.answered{opacity:.6;border-left-color:#ccc}
+.ai-ask-head{margin-bottom:8px}
+.ai-ask-tag{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#a17400}
+.ai-ask-q{margin-bottom:10px}
+.ai-ask-label{font-size:11.5px;line-height:1.55;margin-bottom:5px;color:#3a3a3a}
+.ai-ask-opts{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:4px}
+.ai-ask-opt{font-size:10.5px;padding:3px 9px;border:1px solid #e0d5b8;background:#fff;
+  border-radius:2px;cursor:pointer;color:#6b5b2e;font-family:Arial,sans-serif}
+.ai-ask-opt:hover{border-color:var(--golden,#F9B000)}
+.ai-ask-opt.on{background:var(--golden,#F9B000);color:#fff;border-color:var(--golden,#F9B000);font-weight:700}
+.ai-ask-input{width:100%;box-sizing:border-box;padding:4px 7px;border:1px solid #e6e6e6;
+  border-radius:2px;font-size:11px;font-family:Arial,sans-serif;outline:none}
+.ai-ask-input:focus{border-color:var(--golden,#F9B000)}
+.ai-ask-send{margin-top:2px;padding:5px 12px;font-size:11px}
+.ai-ask button[disabled],.ai-ask input[disabled]{cursor:default}
