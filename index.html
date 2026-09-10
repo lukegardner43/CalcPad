@@ -5432,6 +5432,27 @@ function bootstrap() {
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootstrap);
 else bootstrap();
+
+// ── Beta features ──────────────────────────────────────────────
+// The beta build is this same file with an extra layer loaded on top, not a
+// second copy of the app. Beta/index.html sends the tester here with ?beta=1,
+// and the two files below are fetched from Beta/. Keeping the flag here rather
+// than forking the page is what stops the beta drifting out of step with main:
+// a fix made here is in the beta the moment it is pushed. Everything
+// beta-specific lives in Beta/ — remove that folder and these lines are inert.
+function loadBetaFeatures() {
+  const css = document.createElement('link');
+  css.rel = 'stylesheet';
+  css.href = 'Beta/ai-features.css';
+  document.head.appendChild(css);
+  const js = document.createElement('script');
+  js.src = 'Beta/ai-features.js';
+  js.onerror = () => console.warn('CalcPad: beta features not found at Beta/ai-features.js');
+  document.body.appendChild(js);
+}
+if (/(^|[?&])beta=1(&|$)/.test(location.search) ||
+    location.hash === '#beta' ||
+    /\/Beta\//i.test(location.pathname)) loadBetaFeatures();
 </script>
 </body>
 </html>
