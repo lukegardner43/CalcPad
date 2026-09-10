@@ -1432,12 +1432,31 @@ function unitToLatex(unit) {
 }
 
 // Split "10mm" or "10 m/s" into {val:10, numStr:"10", unit:"mm"/"m/s"}, or null.
+// A unit is one token: letters and digits, the exponent marks, and the * · /
+// that join them. It never contains a space or a semicolon.
+//
+// Without this test the ".*" below swallowed whatever followed the number and
+// called it a unit, so "b = 200 mm; check later" was read as 200 of the unit
+// "mm; check later". That unit converts to nothing, and the fallbacks in
+// commitFormula(), parseVarDefinition() and pasteLineToFragment() all keep the
+// bare number when a conversion fails — so b was stored as 200 where 200 mm
+// should have become 0.2 m. Everything downstream was then out by a factor of
+// a thousand, with the chip still reading "200 mm" and nothing reported.
+// A genuinely unknown single-token unit ("furlong") still passes, and is still
+// carried through as an opaque label.
+const UNIT_TOKEN_RE = /^[A-Za-z][A-Za-z0-9\u00B2\u00B3\u2074^*\u00B7\/+.-]*$/;
+
 function extractValueAndUnit(exprStr) {
   const m = exprStr.trim().match(/^([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*([a-zA-Z].*)$/);
   if (!m) return null;
   const numVal = parseFloat(m[1]);
   if (isNaN(numVal)) return null;
-  return { val: numVal, numStr: m[1], unit: m[2].trim() };
+  const unit = m[2].trim();
+  // Trailing prose is not a unit. Refusing it here sends the caller down its
+  // error path, which shows the line as an error chip that can be edited back
+  // into shape — a visible failure instead of a wrong number.
+  if (!UNIT_TOKEN_RE.test(unit)) return null;
+  return { val: numVal, numStr: m[1], unit };
 }
 
 // True value+unit literal ("2.4 m", "30 deg", "0.6 kN/m2") — i.e. the WHOLE
