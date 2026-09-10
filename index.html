@@ -266,6 +266,8 @@ body{
 .chip-flash{outline:2px solid var(--rubine);outline-offset:1px;border-radius:2px}
 /* A second definition of a name already in use — the first one stays in effect */
 .var-def-chip.dup-name{outline:1px dashed var(--rubine);outline-offset:2px;border-radius:2px;opacity:.75}
+.var-def-chip.bad-unit{outline:1.5px solid #d33;outline-offset:2px;border-radius:2px;background:#fff1f1}
+@media print{.var-def-chip.bad-unit{outline:none;background:transparent}}
 .calc-table td.dup-name,.calc-table th.dup-name{outline:1px dashed var(--rubine);outline-offset:-2px}
 @media print{.var-def-chip.dup-name,.calc-table td.dup-name,.calc-table th.dup-name{outline:none;opacity:1}}
 /* Autosave failure notice — browser storage is finite and mostly filled by images */
@@ -278,6 +280,14 @@ body{
 #saveWarn button{margin-left:10px;padding:3px 10px;border:1px solid #ddd;background:#fff;
   border-radius:3px;cursor:pointer;font-size:11px;font-family:Arial,sans-serif}
 @media print{#saveWarn{display:none!important}}
+#unitWarn{display:none;position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:9500;
+  background:#fff;border-top:3px solid #d33;box-shadow:0 4px 20px rgba(0,0,0,.25);
+  padding:10px 14px;border-radius:4px;font-family:Arial,sans-serif;font-size:12px;color:var(--dark);
+  max-width:min(620px,92vw);line-height:1.6}
+#unitWarn.show{display:block}
+#unitWarn button{margin-left:8px;padding:3px 10px;border:1px solid #ddd;background:#fff;
+  border-radius:3px;cursor:pointer;font-size:11px;font-family:Arial,sans-serif}
+@media print{#unitWarn{display:none!important}}
 .flhs{flex-shrink:0}
 /* inline-flex so these still sit on one line inside the inline-block chip */
 .fseg-right{display:inline-flex;flex-wrap:wrap;align-items:baseline;min-width:0}
@@ -749,6 +759,18 @@ body{
   (embedded images are the usual cause). Your work is safe on screen, but it will
   not survive a reload. Use <strong>File ▸ Save as</strong> to keep it.
   <button onclick="document.getElementById('saveWarn').classList.remove('show')">Dismiss</button>
+</div>
+
+<!-- Shown when a document written before the unit fix carries a definition whose
+     "unit" is really trailing prose. Its value was stored unconverted, so
+     anything derived from it may be out by whatever the conversion would have
+     been — see flagUnparseableUnits(). -->
+<div id="unitWarn">
+  <b>Check these definitions</b> — the unit on
+  <span id="unitWarnList" style="color:#d33;font-weight:700"></span>
+  is not a unit, so the value was stored without being converted and anything
+  using it may be wrong. They are outlined in red. Double-click one to correct it.
+  <button onclick="document.getElementById('unitWarn').classList.remove('show')">Dismiss</button>
 </div>
 
 <!-- Print warning -->
@@ -3444,9 +3466,37 @@ function rebuildVars(seed) {
   }
   _rebuildPromoted = false;
   renderSidebar();
+  // Only the innermost pass of a retry chain reaches here, so this runs once
+  // per settled rebuild rather than once per attempt.
+  flagUnparseableUnits();
   autoSave();
   // Release suppression after MutationObserver microtasks have fired and been ignored
   setTimeout(() => { _rebuildActive = false; }, 200);
+}
+
+// A saved document keeps whatever it was given. Files written before
+// UNIT_TOKEN_RE landed can hold a definition whose unit is really trailing
+// prose — "mm; check later" — and whose value was therefore stored as the bare
+// number, unconverted. The parser refuses those now, but only for new input, so
+// opening an old file has to find them and say so rather than keep them quietly.
+// Run from rebuildVars(), so correcting a flagged line clears its own warning.
+function flagUnparseableUnits() {
+  const bad = [];
+  document.querySelectorAll('.var-def-chip').forEach(chip => {
+    const offender = [chip.dataset.varUnit, chip.dataset.varDisplayUnit]
+      .find(u => u && !UNIT_TOKEN_RE.test(u));
+    if (!offender) { chip.classList.remove('bad-unit'); chip.removeAttribute('data-bad-unit'); return; }
+    chip.classList.add('bad-unit');
+    chip.dataset.badUnit = offender;
+    chip.title = '"' + offender + '" is not a unit. This value was stored without being ' +
+      'converted, so anything using it may be wrong. Double-click to correct the line.';
+    bad.push(chip.dataset.varName || '?');
+  });
+  const el = document.getElementById('unitWarn');
+  if (!el) return;
+  if (!bad.length) { el.classList.remove('show'); return; }
+  document.getElementById('unitWarnList').textContent = Array.from(new Set(bad)).join(', ');
+  el.classList.add('show');
 }
 
 function recalcAll() { rebuildVars(); }
@@ -4377,6 +4427,14 @@ function chunkPlainText(root) {
       out += '\t'; return;
     }
     const isBlock = /^(P|DIV|H1|H2|H3|LI|TR|BLOCKQUOTE|TABLE)$/.test(node.tagName);
+    // A block boundary breaks the line on both sides. Only closing it was
+    // enough while every line sat in its own block, but the first line of a
+    // document is written straight into the editor with no wrapper: the browser
+    // only starts making <div>s from the second line on. Nothing then separated
+    // line one from line two, so a copied calculation pasted into Word or an
+    // email ran them together — "Span L = 6 m Width b = 200 mm" — while the
+    // page itself showed them on separate lines.
+    if (isBlock && out && !/\n$/.test(out)) out += '\n';
     for (const c of node.childNodes) walk(c);
     if (isBlock) out += '\n';
   })(root);
