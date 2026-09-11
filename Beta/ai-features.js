@@ -229,7 +229,10 @@ function variableInventory() {
   return chips.map(c => {
     const name = c.dataset.varName || '?';
     const si   = (typeof varUnits !== 'undefined' && varUnits[name]) || '';
-    const dim  = si ? (DIMENSION_NAMES[si] || si) : 'dimensionless — no unit was given';
+    // Worded as a statement of fact, not a fault. "no unit was given" read as
+    // something to be corrected, and the model duly corrected it by appending
+    // [#] to quantities that never had a unit to strip.
+    const dim  = si ? (DIMENSION_NAMES[si] || si) : 'no unit — a plain number';
     const label = chipLabel(c);
     const sect  = sections.get(c) || '';
     return '  ' + varChipExportText(c) +
@@ -771,9 +774,29 @@ const CALCPAD_GUIDE = [
   '  A_s = ... [mm2/m]        kept as written rather than reduced',
   '  k = 1+sqrt(f_ck/200) [#MPa]   "#" forces the unit with no conversion and no',
   '                                dimension check — for empirical code formulas',
-  '  x = expr [#]             strip the unit, leave a plain number',
+  '  x = expr [#]             strip a unit the expression carries, leaving a number',
   '  f_ck[#MPa]               inside a formula: that term as a plain number in MPa.',
   '                           Strip every term in a formula or none of them.',
+  '',
+  'The "#" forms are an escape hatch, not a way of saying "this is dimensionless".',
+  'They exist for empirical code expressions — several Eurocode shear formulas among',
+  'them — that are calibrated for particular units and do not carry their dimensions',
+  'through, so the unit CalcPad works out would be wrong. Reach for one only when a',
+  'dimension check would otherwise fail or produce a unit you know to be wrong.',
+  '',
+  'Do not put [#] on a quantity that has no unit in the first place. A ratio, a',
+  'factor, a coefficient or a bare count is already a plain number, and the bracket',
+  'adds nothing:',
+  '',
+  '  alpha_cc = 0.85          correct',
+  '  alpha_cc = 0.85 [#]      wrong — there is no unit here to strip',
+  '  gamma_c = 1.5            correct',
+  '  n_bars = 4               correct',
+  '',
+  'The same goes for a formula whose terms are all dimensionless: write',
+  '"ratio = M_Ed/M_Rd", not "ratio = M_Ed/M_Rd [#]". Leave the brackets off unless',
+  'you are deliberately overriding a unit the engine would otherwise get wrong, and',
+  'say in the prose why you had to.',
   '',
   'Names: letters, digits and underscores, starting with a letter. The underscore is a',
   'subscript, so M_Ed renders as M with subscript Ed. A name that is a Greek letter',

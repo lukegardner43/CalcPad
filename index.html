@@ -3074,6 +3074,29 @@ function findTextSplitOffset(node, maxH, edTop) {
 // Split `node` so the portion below maxH is returned (detached) for moving to the
 // next page, while the portion above maxH stays in place. Returns null if nothing
 // needs to move, or the whole node if it can't be split (atomic element below maxH).
+// A table continued on the next page repeats its header, or the reader meets a
+// block of numbers with nothing saying what the columns are.
+//
+// Both the splitter and the restore path in pullBackFromNext have to do this,
+// and they have to agree: pullBack merges a tail back to test whether it now
+// fits, and when it doesn't it rebuilds the tail from scratch. That rebuild
+// dropped the header, so any table that had been pulled back once lost its
+// header for good.
+//
+// The copy is marked so merging can drop it again and so it never reaches a
+// saved file — the repeat is a fact about this page layout, not the document.
+// insertBefore rather than append, so it lands first whichever order the caller
+// fills the tail in.
+function addRepeatedHeader(tailEl, sourceEl) {
+  if (!tailEl || tailEl.tagName !== 'TABLE' || !sourceEl) return;
+  if (tailEl.querySelector(':scope > [data-reflow-repeat]')) return;
+  const head = sourceEl.querySelector(':scope > thead');
+  if (!head) return;
+  const rep = head.cloneNode(true);
+  rep.setAttribute('data-reflow-repeat', '1');
+  tailEl.insertBefore(rep, tailEl.firstChild);
+}
+
 function splitNodeAtHeight(node, maxH, edTop) {
   if (node.nodeType === Node.TEXT_NODE) {
     const off = findTextSplitOffset(node, maxH, edTop);
@@ -3083,8 +3106,24 @@ function splitNodeAtHeight(node, maxH, edTop) {
   }
   if (node.nodeType !== Node.ELEMENT_NODE) return null;
   // Atomic blocks can't be split internally — caller moves them whole.
-  if (node.matches && node.matches('img, .calc-img-wrap, .formula-chip, .var-def-chip'))
+  // A table row is atomic too: splitting through one used to recurse into the
+  // cells and leave an empty row behind on each side of the break, plus a stray
+  // one-row table. A table breaks between rows or not at all.
+  if (node.matches && node.matches('img, .calc-img-wrap, .formula-chip, .var-def-chip, tr'))
     return null;
+
+  // A table that would leave almost nothing behind is better moved whole than
+  // broken: a header and one row stranded at the foot of a page reads as a
+  // mistake. Two body rows is the least that looks deliberate.
+  if (node.tagName === 'TABLE') {
+    const body = node.tBodies[0];
+    const rows = body ? Array.from(body.rows) : [];
+    const staying = rows.filter(r => {
+      const e = nodeEdges(r, edTop);
+      return e && e.bottom <= maxH;
+    }).length;
+    if (staying < 2) return null;
+  }
 
   const kids = Array.from(node.childNodes);
   for (let i = 0; i < kids.length; i++) {
@@ -3099,6 +3138,7 @@ function splitNodeAtHeight(node, maxH, edTop) {
     clone.setAttribute('data-reflow-split', '1');
     clone.appendChild(moved && moved !== kids[i] ? moved : kids[i]);
     for (let j = i + 1; j < kids.length; j++) clone.appendChild(kids[j]);
+    addRepeatedHeader(clone, node);
     return clone;
   }
   return null;
@@ -3130,9 +3170,22 @@ function _pullBackFromNext(edEl, contEl) {
                      lastChild && lastChild.nodeType === Node.ELEMENT_NODE &&
                      node.tagName === lastChild.tagName &&
                      node.className === lastChild.className;
-    const origChildCount = canMerge ? lastChild.childNodes.length : 0;
+    // Two halves of a table rejoin row by row into the one tbody. Moving the
+    // tail's tbody across wholesale would leave the table with two of them, and
+    // another every time it was split and rejoined.
+    const isTableMerge = canMerge && node.tagName === 'TABLE' &&
+                         lastChild.tBodies[0] && node.tBodies[0];
+    const origChildCount = canMerge && !isTableMerge ? lastChild.childNodes.length : 0;
+    const origRowCount = isTableMerge ? lastChild.tBodies[0].rows.length : 0;
 
-    if (canMerge) {
+    if (isTableMerge) {
+      // The repeated header only existed because the table was broken; merging
+      // would bury a second thead in the middle of it.
+      node.querySelectorAll(':scope > [data-reflow-repeat]').forEach(n => n.remove());
+      const destBody = lastChild.tBodies[0], srcBody = node.tBodies[0];
+      while (srcBody.firstChild) destBody.appendChild(srcBody.firstChild);
+      node.remove();
+    } else if (canMerge) {
       while (node.firstChild) lastChild.appendChild(node.firstChild);
       node.remove();
     } else {
@@ -3148,7 +3201,16 @@ function _pullBackFromNext(edEl, contEl) {
       pulled = true;
     } else {
       // Doesn't fit — undo the move/merge and stop.
-      if (canMerge) {
+      if (isTableMerge) {
+        const restored = lastChild.cloneNode(false);
+        restored.setAttribute('data-reflow-split', '1'); // still a tail remnant
+        const tb = document.createElement('tbody');
+        const rows = Array.from(lastChild.tBodies[0].rows);
+        for (let i = origRowCount; i < rows.length; i++) tb.appendChild(rows[i]);
+        restored.appendChild(tb);
+        addRepeatedHeader(restored, lastChild);
+        nextEdEl.insertBefore(restored, nextEdEl.firstChild);
+      } else if (canMerge) {
         const restored = lastChild.cloneNode(false);
         restored.setAttribute('data-reflow-split', '1'); // still a tail remnant
         const kids = Array.from(lastChild.childNodes);
@@ -5334,8 +5396,14 @@ function captureDoc() {
   return {
     version: 2,
     meta: collectMeta(),
+    // data-tbl-handlers is a runtime marker and must go, or a loaded table looks
+    // already-wired and never gets its listeners. data-reflow-split stays: it is
+    // what marks a tail as the continuation of the node above it, and stripping
+    // it meant a table that happened to straddle a page break when the file was
+    // saved could never rejoin — it came back as two tables, the second with no
+    // header, permanently. The repeated header stays with it for the same
+    // reason; addRepeatedHeader() will not add a second one.
     pages: getAllEditors().map(ed => ed.innerHTML
-      .replace(/ data-reflow-split="1"/g, '')
       .replace(/ data-tbl-handlers="1"/g, '')),
     preferredUnits: { ...preferredUnits },
   };
