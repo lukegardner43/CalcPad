@@ -6196,7 +6196,11 @@ function buildPackPrint() {
   const root = document.createElement('div');
   root.className = 'pack-print';
 
+  // The contents page borrows the first check's title block — one job, so the
+  // project number, date and originator are shared — but says what the sheet
+  // itself is rather than repeating the first check's description.
   const firstMeta = (project.checks[0] && project.checks[0].doc && project.checks[0].doc.meta) || {};
+  const contentsMeta = { ...firstMeta, 'm-desc': 'Table of Contents' };
 
   // Work out where each check starts before drawing anything, so the contents
   // page can carry real sheet numbers.
@@ -6212,7 +6216,7 @@ function buildPackPrint() {
   cWrap.className = 'page-wrap';
   const cPage = document.createElement('div');
   cPage.className = 'a4-page';
-  cPage.appendChild(buildHeaderFrom(firstMeta, 'C', false));
+  cPage.appendChild(buildHeaderFrom(contentsMeta, 'C', false));
   const cCont = document.createElement('div');
   cCont.className = 'pg-content';
   const cInner = document.createElement('div');
