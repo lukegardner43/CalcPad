@@ -2831,6 +2831,73 @@ document.addEventListener('click', e => {
   sel.addRange(range);
 });
 
+// Enter at the very bottom of a full page starts the next one.
+//
+// A page clips what does not fit, so a break inserted at the end of a full page
+// lands below the visible area: nothing appears to happen, and whatever is typed
+// next is hidden too. Reflow does not rescue it either — an empty line at the
+// end of a contenteditable is the browser's own trailing filler and adds no
+// height, so the page never reports itself as overflowing and nothing moves.
+//
+// Only the combination matters: the caret at the end of this page's content AND
+// the page already full. Enter anywhere else behaves normally and reflow deals
+// with any overflow that follows.
+function startNextPageOnEnter(ed, e) {
+  const cont = ed.closest('.pg-content');
+  if (!cont) return false;
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return false;
+  const r = sel.getRangeAt(0);
+  if (!r.collapsed || !ed.contains(r.startContainer)) return false;
+
+  // Nothing but whitespace between the caret and the end of the page?
+  const rest = document.createRange();
+  rest.selectNodeContents(ed);
+  try { rest.setStart(r.endContainer, r.endOffset); } catch (err) { return false; }
+  if (rest.toString().trim() !== '') return false;
+  if (rest.cloneContents().querySelector('img, .calc-img-wrap, table, .formula-chip, .var-def-chip'))
+    return false;
+
+  // Is there room for one more line? That is the question the typist is asking,
+  // and it is not the same as "is the box full": reflow stops a page a padding's
+  // worth above its visible bottom, so a page it calls full still shows a couple
+  // of dozen spare pixels. Measure against the same limit reflow uses.
+  //
+  // Measured from where the content actually ends. The editor fills its
+  // container, so its scrollHeight never drops below the container's
+  // clientHeight — comparing those two asks nothing, and every page, empty ones
+  // included, answers "full".
+  const span = document.createRange();
+  span.selectNodeContents(ed);
+  const rects = span.getClientRects();
+  const edTop = ed.getBoundingClientRect().top;
+  const contentBottom = rects.length ? rects[rects.length - 1].bottom - edTop : 0;
+  const padBottom = parseFloat(getComputedStyle(ed).paddingBottom) || 0;
+  const splitH = cont.clientHeight - padBottom;
+
+  // A line needs its line-height, not the height of the text rect inside it —
+  // getClientRects() reports the glyph box (12px here) where the line actually
+  // steps 21px, so measuring the rect said another line would fit in a gap that
+  // could not hold one.
+  const cs = getComputedStyle(ed);
+  const line = parseFloat(cs.lineHeight) || (parseFloat(cs.fontSize) || 11) * 1.9;
+  if (splitH - contentBottom >= line) return false;   // another line still fits
+
+  e.preventDefault();
+  const idx = ed.id === 'editor' ? 0 : parseInt(ed.id.replace('editor', ''), 10);
+  let nextEd = document.getElementById('editor' + (idx + 1));
+  if (!nextEd) nextEd = addPage(true);
+  nextEd.focus();
+  setActiveEditor(nextEd);
+  const nr = document.createRange();
+  nr.selectNodeContents(nextEd);
+  nr.collapse(true);                       // the top of the new page, not the end
+  sel.removeAllRanges();
+  sel.addRange(nr);
+  isDirty = true; autoSave();
+  return true;
+}
+
 // ── Page management ────────────────────────────────────────────
 let pageCount = 1;
 
@@ -3315,12 +3382,18 @@ function _pullBackFromNext(edEl, contEl) {
   // Merge adjacent text nodes that a previous splitText() may have left adjacent.
   if (pulled) edEl.normalize();
 
-  // If the next page is now empty, remove it automatically.
+  // If the next page is now empty, remove it automatically — unless the caret is
+  // sitting in it, which it is when someone has just pressed Enter at the foot
+  // of a full page to start writing there. Tidying it away then deletes the page
+  // out from under them and puts the caret back where it came from.
   const nextIsEmpty = !nextEdEl.hasChildNodes() ||
     (!nextEdEl.textContent.trim() &&
      !nextEdEl.querySelector('img,.calc-img-wrap,.formula-chip,.var-def-chip'));
+  const caretIsThere = document.activeElement === nextEdEl ||
+    (() => { const s = window.getSelection();
+             return s.rangeCount && nextEdEl.contains(s.getRangeAt(0).startContainer); })();
 
-  if (nextIsEmpty) {
+  if (nextIsEmpty && !caretIsThere) {
     const nextWrap = nextEdEl.closest('.page-wrap');
     if (nextWrap) { nextWrap.remove(); renumberPages(); }
   } else if (pulled) {
@@ -3877,6 +3950,7 @@ document.addEventListener('keydown', e => {
   }
   // Escape abandons a variable-chip edit: re-enable reflow (text stays as typed).
   if (_editingVarDef && e.key === 'Escape') { _editingVarDef = false; }
+  if (e.key === 'Enter' && !e.shiftKey && startNextPageOnEnter(ed, e)) return;
   if (e.key === 'Enter') {
     const sel = window.getSelection();
     if (!sel.rangeCount) return;
@@ -4068,6 +4142,36 @@ document.addEventListener('click', e => {
     if (n.nodeType !== Node.ELEMENT_NODE) n = n.parentElement;
     if (n && n.closest && n.closest('.calc-area')) sel.collapseToEnd();
   }, 60);
+}, true);
+
+// Ctrl/Cmd+A selects the whole calculation, not just the page the caret is on.
+//
+// Each page is its own contenteditable, and the browser's own select-all stops
+// at the edge of the one it is in — which is not what "all" means to someone
+// looking at a six-page calculation. A range CAN span two pages when it is
+// built directly, even though the browser will not extend one that far by
+// mouse, so select-all is built rather than delegated.
+//
+// A single page is left to the browser: its select-all is already right there,
+// and it handles the empty-document and caret-placement cases better than this
+// would.
+document.addEventListener('keydown', e => {
+  if (e.key !== 'a' && e.key !== 'A') return;
+  if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+  const eds = getAllEditors();
+  if (eds.length < 2) return;
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return;
+  let n = sel.getRangeAt(0).startContainer;
+  if (n.nodeType !== Node.ELEMENT_NODE) n = n.parentElement;
+  if (!n || !n.closest || !n.closest('.calc-area')) return;   // not in a sheet
+  const first = eds[0], last = eds[eds.length - 1];
+  e.preventDefault();
+  const r = document.createRange();
+  r.setStart(first, 0);
+  r.setEnd(last, last.childNodes.length);
+  sel.removeAllRanges();
+  sel.addRange(r);
 }, true);
 
 // Safety net for selections that highlight a swathe of the page but hold no
