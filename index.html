@@ -101,6 +101,58 @@ body{
 .fd-item svg{width:13px;height:13px;fill:currentColor;flex-shrink:0;opacity:.7}
 .fd-sep{height:1px;background:#eee;margin:3px 0}
 
+/* ── Proofing panel ── */
+.proof-btn{background:#fff!important;border-color:#ddd!important;padding:0 10px!important;margin-left:4px}
+.proof-btn:hover{background:#fce6f1!important;border-color:#f4a8cc!important;color:var(--rubine)!important}
+.proof-panel{position:fixed;right:0;top:0;bottom:0;width:330px;max-width:100vw;background:#fff;
+  border-left:1px solid #ddd;box-shadow:-3px 0 14px rgba(0,0,0,.10);z-index:170;
+  display:none;flex-direction:column;font-family:Arial,sans-serif;font-size:11.5px;color:var(--dark)}
+.proof-panel.open{display:flex}
+.proof-head{background:var(--rubine);color:#fff;padding:8px 12px;display:flex;align-items:baseline;gap:8px;flex-shrink:0}
+.proof-title{font-weight:700;font-size:12.5px}
+.proof-sub{font-size:9.5px;opacity:.85}
+.proof-close{margin-left:auto;background:transparent;border:none;color:#fff;font-size:17px;
+  line-height:1;cursor:pointer;opacity:.85;padding:0 2px}
+.proof-close:hover{opacity:1}
+.proof-opts{display:flex;flex-wrap:wrap;gap:4px 12px;padding:8px 12px;border-bottom:1px solid #eee;
+  background:#fafafa;flex-shrink:0}
+.proof-opts label{display:flex;align-items:center;gap:4px;font-size:10.5px;color:var(--mid);cursor:pointer}
+.proof-bar{display:flex;gap:6px;padding:8px 12px 4px;flex-shrink:0}
+.proof-run,.proof-fixall{padding:5px 11px;border-radius:3px;cursor:pointer;font-size:11px;
+  font-family:Arial,sans-serif;border:1px solid #ddd;background:#fff;color:var(--dark)}
+.proof-run:hover{border-color:#f4a8cc;color:var(--rubine)}
+.proof-fixall{background:var(--rubine);color:#fff;border-color:var(--rubine);font-weight:700;margin-left:auto}
+.proof-fixall:hover{background:#b8005e}
+.proof-fixall[disabled]{background:#e4d5de;border-color:#e4d5de;cursor:default}
+.proof-status{padding:0 12px;font-size:10.5px;color:#2a7a4a;min-height:14px;flex-shrink:0}
+.proof-chips{display:flex;flex-wrap:wrap;gap:4px;padding:6px 12px;flex-shrink:0}
+.proof-chip{font-size:10px;font-weight:700;border-radius:2px;padding:2px 7px;border:1px solid transparent;
+  cursor:pointer;background:#f4f4f4;color:#777;font-family:Arial,sans-serif}
+.proof-chip.on{background:var(--rubine);color:#fff;border-color:var(--rubine)}
+.proof-list{flex:1;overflow-y:auto;padding:4px 12px 12px;display:flex;flex-direction:column;gap:7px}
+.proof-item{border:1px solid #e9e9e9;border-left-width:3px;border-radius:3px;padding:7px 9px;cursor:pointer;background:#fff}
+.proof-item:hover{background:#fffafc;border-color:#f0cfe0}
+.proof-item.sev-high{border-left-color:#d33}
+.proof-item.sev-medium{border-left-color:#e8a33d}
+.proof-item.sev-low{border-left-color:#9aa}
+.proof-top{margin-bottom:3px}
+.proof-tag{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+  background:#f6eef3;color:var(--rubine);border-radius:2px;padding:1.5px 5px}
+.proof-msg{font-size:11.5px;line-height:1.55}
+.proof-quote{font-size:10.5px;color:#888;font-style:italic;border-left:2px solid #eee;
+  padding-left:7px;margin:4px 0;line-height:1.5;word-break:break-word}
+.proof-acts{margin-top:5px}
+.proof-fix{font-size:10.5px;padding:3px 9px;border:1px solid #cfe6d8;background:#f2fbf5;
+  color:#1e5c37;border-radius:2px;cursor:pointer;font-family:Arial,sans-serif;font-weight:700}
+.proof-fix:hover{background:#2a9d5c;color:#fff;border-color:#2a9d5c}
+.proof-empty{text-align:center;color:var(--mid);font-size:11px;padding:24px 10px;line-height:1.7}
+.proof-foot{flex-shrink:0;border-top:1px solid #eee;padding:6px 12px;font-size:9.5px;color:#aaa;background:#fafafa}
+.proof-mark{position:absolute;background:rgba(229,0,118,.20);border-bottom:2px solid var(--rubine);
+  pointer-events:none;z-index:7000;border-radius:1px;animation:proof-flash 2.4s ease-out forwards}
+@keyframes proof-flash{0%{opacity:0}8%{opacity:1}70%{opacity:1}100%{opacity:0}}
+@media screen and (min-width:561px){ body.proof-open{padding-right:330px} }
+@media print{.proof-panel,.proof-mark,.proof-btn{display:none!important}}
+
 /* ── Project panel ── */
 .fd-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;
   color:#aaa;padding:5px 14px 2px}
@@ -602,6 +654,10 @@ body.has-project{padding-left:230px}
     </div>
   </div>
   <div class="sep"></div>
+  <button class="tbtn proof-btn" onclick="openProof()" title="Check spelling, grammar and punctuation">
+    <svg viewBox="0 0 16 16" style="width:13px;height:13px"><path d="M2 12.5L5 3h1.6l3 9.5H8.2l-.7-2.3H4.2l-.7 2.3H2zm2.6-3.6h2.5L5.9 4.9 4.6 8.9z"/><path d="M10.5 9.6l1.1 1.2 3-3.2-.9-.9-2.1 2.2-.5-.6-.9.9z"/></svg>
+    Check
+  </button>
   <button class="tbtn print-btn" onclick="triggerPrint()">
     <svg viewBox="0 0 16 16" style="width:13px;height:13px"><path d="M4 1.5h8v3.5H4V1.5zm-2 4h12c.55 0 1 .45 1 1v4.5c0 .55-.45 1-1 1H13v3H3v-3H2c-.55 0-1-.45-1-1V6.5c0-.55.45-1 1-1zm1 1.5c-.41 0-.75.34-.75.75s.34.75.75.75.75-.34.75-.75S3.41 7 3 7zM5 11.5h6V14H5v-2.5z" fill="white"/></svg>
     Print
@@ -698,6 +754,29 @@ body.has-project{padding-left:230px}
           font-size:12px;align-self:flex-end;margin-top:4px;font-family:Arial,sans-serif">Cancel paste</button>
     </div>
   </div>
+</div>
+
+<!-- Proofing panel — rule-based, no AI, no network -->
+<div class="proof-panel" id="proofPanel">
+  <div class="proof-head">
+    <span class="proof-title">Check</span>
+    <span class="proof-sub">spelling · grammar · punctuation</span>
+    <button class="proof-close" onclick="closeProof()" title="Close">&times;</button>
+  </div>
+  <div class="proof-opts">
+    <label><input type="checkbox" class="proof-rule" value="spelling" checked onchange="runProofCheck()"> Spelling</label>
+    <label><input type="checkbox" class="proof-rule" value="grammar" checked onchange="runProofCheck()"> Grammar</label>
+    <label><input type="checkbox" class="proof-rule" value="punctuation" checked onchange="runProofCheck()"> Punctuation</label>
+    <label><input type="checkbox" class="proof-rule" value="british" checked onchange="runProofCheck()"> British spelling</label>
+  </div>
+  <div class="proof-bar">
+    <button class="proof-run" onclick="runProofCheck()">Re-check</button>
+    <button class="proof-fixall" id="proofFixAll" onclick="proofApplyAll()">Fix all shown</button>
+  </div>
+  <div class="proof-status" id="proofStatus"></div>
+  <div class="proof-chips" id="proofChips"></div>
+  <div class="proof-list" id="proofList"></div>
+  <div class="proof-foot">Runs on your machine — nothing is sent anywhere.</div>
 </div>
 
 <!-- Project panel — only present while a pack is open -->
@@ -856,7 +935,7 @@ body.has-project{padding-left:230px}
   </div><!-- /pageWrap0 -->
 
   <!-- Add page button -->
-  <div class="add-page-btn" id="addPageBtn" onclick="addPage()">+ Add page</div>
+  <div class="add-page-btn" id="addPageBtn" onclick="addPage(true)">+ Add page</div>
 
 </div><!-- /pageStack -->
 
@@ -2879,7 +2958,11 @@ document.querySelectorAll('.mc input').forEach(inp => {
   inp.addEventListener('input', () => { updateMirrorHeaders(); isDirty = true; autoSave(); });
 });
 
-function addPage() {
+// focusNew: put the caret in the new page. True when someone presses "+ Add
+// page" — they want to start typing there. False everywhere else: reflow calls
+// this when a page overflows, and loading a file calls it once per stored page,
+// and in neither case should the caret leave where it was.
+function addPage(focusNew) {
   const pageIdx = pageCount;
   const wrapId  = 'pageWrap' + pageIdx;
   const pageId  = 'page'     + pageIdx;
@@ -2931,9 +3014,15 @@ function addPage() {
   const h = getPage2ContentHeight();
   cont.style.height = h + 'px';
 
-  // Focus new editor
-  newEdEl.focus();
-  setActiveEditor(newEdEl);
+  // Focus the new editor only when this was a deliberate "add a page". Doing it
+  // unconditionally moved the caret to the new page whenever typing in the
+  // middle of a full page pushed a line over — and because reflow saves the
+  // cursor after calling this, the caret it saved was already the new page's,
+  // so there was nothing to restore and the caret stayed there.
+  if (focusNew) {
+    newEdEl.focus();
+    setActiveEditor(newEdEl);
+  }
 
   // Delete-page button (page 2+)
   const delBtn = document.createElement('div');
@@ -3283,18 +3372,20 @@ function _reflow(edEl, contEl) {
   let rawId = edEl.id.replace('editor', '');
   const edIdx = rawId === '' ? 0 : parseInt(rawId);
 
-  // Get or create next page editor
-  const nextEdId = 'editor' + (edIdx + 1);
-  let nextEdEl = document.getElementById(nextEdId);
-  if (!nextEdEl) nextEdEl = addPage();
-  const nextContEl = nextEdEl.closest('.pg-content');
-
-  // Save cursor
+  // Save the cursor first. Creating a page used to come before this, and the
+  // act of creating one moved the caret into it — so what got saved was the new
+  // page's caret, not the one the typist was using.
   const sel = window.getSelection();
   let savedRange = null;
   if (sel.rangeCount) {
     try { if (edEl.contains(sel.getRangeAt(0).startContainer)) savedRange = sel.getRangeAt(0).cloneRange(); } catch(e) {}
   }
+
+  // Get or create next page editor
+  const nextEdId = 'editor' + (edIdx + 1);
+  let nextEdEl = document.getElementById(nextEdId);
+  if (!nextEdEl) nextEdEl = addPage();
+  const nextContEl = nextEdEl.closest('.pg-content');
 
   // Find the first child that crosses the page boundary. If it straddles the
   // boundary (starts on this page but extends past it), split it at the line that
@@ -5430,6 +5521,339 @@ function applyDoc(doc) {
 function buildSaveData() {
   return JSON.stringify({ ...captureDoc(), savedAt:new Date().toISOString() }, null, 2);
 }
+
+// ══ PROOFING ═══════════════════════════════════════════════════
+// A rule-based check over the document's prose. No model, no network, no key —
+// it runs on lists and regular expressions, so it is free, instant, and gives
+// the same answer every time.
+//
+// The browser already underlines misspellings as you type. This adds the three
+// things that does not: a list you can work through before issuing, grammar and
+// punctuation, and British-English consistency. Precision matters more than
+// recall here — a check that cries wolf on a calculation sheet full of symbols
+// and code references gets switched off — so this flags only what it is sure
+// of, and everything it flags carries a definite correction.
+
+// Misspellings, including the ones that turn up in structural prose.
+const PROOF_SPELLING = {
+  teh:'the', adn:'and', nad:'and', ot:'to', fo:'of', taht:'that', thsi:'this',
+  recieve:'receive', recieved:'received', seperate:'separate', seperated:'separated',
+  definately:'definitely', occured:'occurred', occuring:'occurring', occurence:'occurrence',
+  neccessary:'necessary', necesary:'necessary', accomodate:'accommodate', acheive:'achieve',
+  arguement:'argument', begining:'beginning', beleive:'believe', calender:'calendar',
+  concious:'conscious', dissapear:'disappear', embarass:'embarrass', enviroment:'environment',
+  existance:'existence', foriegn:'foreign', goverment:'government', grammer:'grammar',
+  gaurd:'guard', harrass:'harass', independant:'independent', knowlege:'knowledge',
+  liase:'liaise', maintainance:'maintenance', maintenence:'maintenance', managment:'management',
+  noticable:'noticeable', occassion:'occasion', paralell:'parallel', parrallel:'parallel',
+  posession:'possession', priviledge:'privilege', publically:'publicly',
+  questionaire:'questionnaire', recomend:'recommend', recomended:'recommended',
+  refered:'referred', relevent:'relevant', repitition:'repetition', rythm:'rhythm',
+  sieze:'seize', similiar:'similar', sucessful:'successful', succesful:'successful',
+  suprise:'surprise', tommorow:'tomorrow', truely:'truly', unfortunatly:'unfortunately',
+  untill:'until', wierd:'weird', thier:'their', threshhold:'threshold', witheld:'withheld',
+  alot:'a lot', infact:'in fact', inorder:'in order',
+  // structural engineering
+  distibuted:'distributed', distrubuted:'distributed', distibution:'distribution',
+  defelction:'deflection', deflction:'deflection', delfection:'deflection',
+  reinforcment:'reinforcement', reinforcemnt:'reinforcement', reinforcment:'reinforcement',
+  concret:'concrete', concerete:'concrete', strenght:'strength', strengh:'strength',
+  lenght:'length', widht:'width', heigth:'height', hieght:'height',
+  momment:'moment', momnet:'moment', bendign:'bending', loadig:'loading',
+  colum:'column', collumn:'column', coloumn:'column', foudation:'foundation',
+  foundatoin:'foundation', ultimat:'ultimate', servicability:'serviceability',
+  serviceabilty:'serviceability', seviceability:'serviceability', capcity:'capacity',
+  capacty:'capacity', resistence:'resistance', stiffnes:'stiffness', stifness:'stiffness',
+  thicknes:'thickness', diamter:'diameter', diametre:'diameter', perimiter:'perimeter',
+  cantilver:'cantilever', cantilevr:'cantilever', tempreature:'temperature',
+  temperture:'temperature', coeficient:'coefficient', coefficent:'coefficient',
+  eccentricty:'eccentricity', slendernes:'slenderness', torsonal:'torsional',
+  flexual:'flexural', compresive:'compressive', tensil:'tensile', anchorge:'anchorage',
+  bearng:'bearing', permissable:'permissible', allowble:'allowable', spacng:'spacing',
+  eurcode:'Eurocode', eurocde:'Eurocode',
+};
+
+// House style is British English.
+const PROOF_BRITISH = {
+  analyze:'analyse', analyzed:'analysed', analyzing:'analysing', analyzes:'analyses',
+  organize:'organise', organized:'organised', organization:'organisation',
+  recognize:'recognise', recognized:'recognised', realize:'realise', realized:'realised',
+  minimize:'minimise', minimized:'minimised', maximize:'maximise', maximized:'maximised',
+  summarize:'summarise', summarized:'summarised', utilize:'utilise', utilized:'utilised',
+  standardize:'standardise', normalize:'normalise', optimize:'optimise', optimized:'optimised',
+  center:'centre', centers:'centres', centered:'centred', centerline:'centreline',
+  fiber:'fibre', fibers:'fibres', color:'colour', colors:'colours',
+  behavior:'behaviour', labor:'labour', neighbor:'neighbour',
+  modeling:'modelling', modeled:'modelled', traveled:'travelled', canceled:'cancelled',
+  labeled:'labelled', leveled:'levelled', aluminum:'aluminium', defense:'defence',
+  catalog:'catalogue', dialog:'dialogue', gray:'grey', plow:'plough',
+};
+
+// "a" before these reads correctly even though they open with a vowel letter,
+// because they are said with a consonant sound. The mirror list is words that
+// open with a silent h and so take "an".
+const PROOF_A_OK  = /^(uni|union|uniqu|univers|uniform|use|usu|usab|util|utop|eu|euro|one|once|ewe)/i;
+const PROOF_AN_OK = /^(hour|honest|honou?r|heir)/i;
+// Words that legitimately double up.
+const PROOF_DOUBLE_OK = new Set(['had','that','is','very','no','ha','well']);
+// Short forms that end in a full stop mid-sentence.
+const PROOF_ABBREV = new Set(['cl','fig','no','eq','ref','approx','max','min','vol','pp','cf','ca','etc','ie','eg','vs','st','rd','dr','mr','mrs','ms']);
+
+const PROOF_RULES = [
+  { id:'spelling', label:'Spelling', severity:'high',
+    scan(text, add) {
+      const re = /\b[A-Za-z][A-Za-z']*\b/g; let m;
+      while ((m = re.exec(text))) {
+        const w = m[0], fix = PROOF_SPELLING[w.toLowerCase()];
+        if (!fix) continue;
+        add(m.index, w.length, matchCase(w, fix), '"' + w + '" is misspelt.');
+      }
+    } },
+  { id:'british', label:'British English', severity:'low',
+    scan(text, add) {
+      const re = /\b[A-Za-z]+\b/g; let m;
+      while ((m = re.exec(text))) {
+        const w = m[0], fix = PROOF_BRITISH[w.toLowerCase()];
+        if (!fix) continue;
+        add(m.index, w.length, matchCase(w, fix), '"' + w + '" is the American spelling.');
+      }
+    } },
+  { id:'grammar', label:'Grammar', severity:'medium',
+    scan(text, add) {
+      let m;
+      // a / an
+      const an = /\b(a)\s+([aeiouAEIOU][A-Za-z]*)/g;
+      while ((m = an.exec(text))) {
+        if (PROOF_A_OK.test(m[2])) continue;
+        add(m.index, 1, matchCase(m[1], 'an'), '"a" before a vowel sound — should be "an ' + m[2] + '".');
+      }
+      const a = /\b(an)\s+([A-Za-z][A-Za-z]*)/g;
+      while ((m = a.exec(text))) {
+        if (/^[aeiou]/i.test(m[2]) || PROOF_AN_OK.test(m[2])) continue;
+        add(m.index, 2, matchCase(m[1], 'a'), '"an" before a consonant sound — should be "a ' + m[2] + '".');
+      }
+      // should of / could of / would of / must of
+      const of_ = /\b(should|could|would|must|might)\s+(of)\b/gi;
+      while ((m = of_.exec(text)))
+        add(m.index, m[0].length, m[1] + ' have', '"' + m[1] + ' of" should be "' + m[1] + ' have".');
+      // a word typed twice
+      const dbl = /\b([A-Za-z]{2,})(\s+)(\1)\b/gi;
+      while ((m = dbl.exec(text))) {
+        if (PROOF_DOUBLE_OK.has(m[1].toLowerCase())) continue;
+        add(m.index, m[0].length, m[1], '"' + m[1] + '" is repeated.');
+      }
+    } },
+  { id:'punctuation', label:'Punctuation', severity:'medium',
+    scan(text, add) {
+      let m;
+      const sp = /[ \u00A0]{2,}/g;
+      while ((m = sp.exec(text))) add(m.index, m[0].length, ' ', 'More than one space.');
+      const before = /[ \u00A0]+([,.;:!?])/g;
+      while ((m = before.exec(text))) add(m.index, m[0].length, m[1], 'Space before "' + m[1] + '".');
+      // Comma or semicolon run straight into the next word. Full stops are left
+      // alone: "6.2", "cl.6" and "EN 1992-1-1" are not sentence breaks.
+      const after = /([,;])(?=[A-Za-z])/g;
+      while ((m = after.exec(text))) add(m.index, 1, m[1] + ' ', 'No space after "' + m[1] + '".');
+      const rep = /([,;:!?])\1+/g;
+      while ((m = rep.exec(text))) add(m.index, m[0].length, m[1], 'Repeated "' + m[1] + '".');
+    } },
+];
+
+// Keep the writer's capitalisation when swapping a word.
+function matchCase(original, replacement) {
+  if (original === original.toUpperCase() && original.length > 1) return replacement.toUpperCase();
+  if (original[0] === original[0].toUpperCase())
+    return replacement[0].toUpperCase() + replacement.slice(1);
+  return replacement;
+}
+
+// Every text node of the document that holds prose. Chips are skipped: their
+// text is a rendered value or a formula, not writing, and "f_ck" is not a typo.
+function proofTextNodes() {
+  const out = [];
+  getAllEditors().forEach(ed => {
+    const walk = document.createTreeWalker(ed, NodeFilter.SHOW_TEXT, {
+      acceptNode(n) {
+        if (!n.nodeValue || !/[A-Za-z]/.test(n.nodeValue)) return NodeFilter.FILTER_REJECT;
+        const el = n.parentElement;
+        if (el && el.closest('.var-def-chip, .formula-chip, .katex')) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    let n; while ((n = walk.nextNode())) out.push(n);
+  });
+  return out;
+}
+
+let proofFindings = [];
+let proofFilter = 'all';
+
+function runProofCheck() {
+  proofFindings = [];
+  const enabled = new Set(
+    Array.from(document.querySelectorAll('.proof-rule:checked')).map(c => c.value));
+  proofTextNodes().forEach(node => {
+    const text = node.nodeValue;
+    PROOF_RULES.forEach(rule => {
+      if (!enabled.has(rule.id)) return;
+      rule.scan(text, (start, len, fix, message) => {
+        proofFindings.push({
+          node, start, len, fix, message,
+          rule: rule.id, label: rule.label, severity: rule.severity,
+          quote: text.slice(Math.max(0, start - 18), start + len + 18).trim(),
+          word: text.substr(start, len),
+        });
+      });
+    });
+  });
+  // Later fixes first within a node, so applying one cannot shift the offsets
+  // of another that has not been applied yet.
+  proofFindings.sort((a, b) => a.node === b.node ? b.start - a.start : 0);
+  renderProofPanel();
+}
+
+function proofRangeOf(f) {
+  if (!f.node.parentNode || f.start + f.len > f.node.nodeValue.length) return null;
+  const r = document.createRange();
+  r.setStart(f.node, f.start);
+  r.setEnd(f.node, f.start + f.len);
+  return r;
+}
+
+function clearProofMarks() { document.querySelectorAll('.proof-mark').forEach(n => n.remove()); }
+
+function proofShow(f) {
+  const r = proofRangeOf(f);
+  if (!r) return false;
+  clearProofMarks();
+  const rects = Array.from(r.getClientRects());
+  if (!rects.length) return false;
+  const sx = window.scrollX, sy = window.scrollY;
+  rects.forEach(rect => {
+    const box = document.createElement('div');
+    box.className = 'proof-mark';
+    box.style.left = (rect.left + sx) + 'px';
+    box.style.top = (rect.top + sy) + 'px';
+    box.style.width = rect.width + 'px';
+    box.style.height = rect.height + 'px';
+    document.body.appendChild(box);
+  });
+  window.scrollTo({ top: rects[0].top + sy - window.innerHeight / 3, behavior: 'smooth' });
+  setTimeout(clearProofMarks, 2600);
+  return true;
+}
+
+// Replace the flagged text in place. Only ever touches a plain text node, so no
+// chip, table or page structure can be disturbed by a correction.
+function proofApply(f) {
+  const r = proofRangeOf(f);
+  if (!r || f.node.nodeValue.substr(f.start, f.len) !== f.word) return false;
+  r.deleteContents();
+  r.insertNode(document.createTextNode(f.fix));
+  f.node.parentNode.normalize();
+  isDirty = true; autoSave();
+  return true;
+}
+
+function proofApplyAll() {
+  const targets = proofFindings.filter(f => proofFilter === 'all' || f.rule === proofFilter);
+  let done = 0;
+  targets.forEach(f => { if (proofApply(f)) done++; });
+  runProofCheck();
+  const st = document.getElementById('proofStatus');
+  if (st) st.textContent = done + (done === 1 ? ' correction applied.' : ' corrections applied.');
+}
+
+function openProof() {
+  // The beta AI panel lives on the same edge; two open at once just overlap.
+  const ai = document.getElementById('aiPanel');
+  if (ai) { ai.classList.remove('open'); document.body.classList.remove('ai-open'); }
+  document.getElementById('proofPanel').classList.add('open');
+  document.body.classList.add('proof-open');
+  runProofCheck();
+}
+
+function closeProof() {
+  document.getElementById('proofPanel').classList.remove('open');
+  document.body.classList.remove('proof-open');
+  clearProofMarks();
+}
+
+function renderProofPanel() {
+  const host = document.getElementById('proofList');
+  if (!host) return;
+  host.textContent = '';
+
+  const counts = {};
+  proofFindings.forEach(f => { counts[f.rule] = (counts[f.rule] || 0) + 1; });
+
+  const chips = document.getElementById('proofChips');
+  chips.textContent = '';
+  const mk = (key, label, n) => {
+    const c = document.createElement('button');
+    c.className = 'proof-chip' + (proofFilter === key ? ' on' : '');
+    c.textContent = label + ' ' + n;
+    c.onclick = () => { proofFilter = key; renderProofPanel(); };
+    return c;
+  };
+  chips.appendChild(mk('all', 'All', proofFindings.length));
+  PROOF_RULES.forEach(r => { if (counts[r.id]) chips.appendChild(mk(r.id, r.label, counts[r.id])); });
+
+  const shown = proofFindings.filter(f => proofFilter === 'all' || f.rule === proofFilter);
+  document.getElementById('proofFixAll').disabled = !shown.length;
+
+  if (!proofFindings.length) {
+    const ok = document.createElement('div');
+    ok.className = 'proof-empty';
+    ok.textContent = 'Nothing found. Spelling, grammar and punctuation read clean.';
+    host.appendChild(ok);
+    return;
+  }
+
+  shown.forEach(f => {
+    const row = document.createElement('div');
+    row.className = 'proof-item sev-' + f.severity;
+
+    const top = document.createElement('div');
+    top.className = 'proof-top';
+    const tag = document.createElement('span');
+    tag.className = 'proof-tag';
+    tag.textContent = f.label;
+    top.appendChild(tag);
+    row.appendChild(top);
+
+    const msg = document.createElement('div');
+    msg.className = 'proof-msg';
+    msg.textContent = f.message;
+    row.appendChild(msg);
+
+    if (f.quote) {
+      const q = document.createElement('div');
+      q.className = 'proof-quote';
+      q.textContent = '…' + f.quote + '…';
+      row.appendChild(q);
+    }
+
+    const acts = document.createElement('div');
+    acts.className = 'proof-acts';
+    const fix = document.createElement('button');
+    fix.className = 'proof-fix';
+    fix.textContent = 'Fix → ' + (f.fix === ' ' ? '(single space)' : f.fix);
+    fix.onclick = e => {
+      e.stopPropagation();
+      if (proofApply(f)) runProofCheck();
+      else { fix.textContent = 'Text has changed'; setTimeout(runProofCheck, 1200); }
+    };
+    acts.appendChild(fix);
+    row.appendChild(acts);
+
+    row.onclick = () => proofShow(f);
+    row.title = 'Click to find this in the document';
+    host.appendChild(row);
+  });
+}
+
+window.addEventListener('resize', clearProofMarks);
 
 // ══ PROJECTS ═══════════════════════════════════════════════════
 // A project is a calculation pack: an ordered set of checks, each one a whole
