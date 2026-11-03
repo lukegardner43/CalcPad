@@ -101,6 +101,14 @@ body{
 .fd-item svg{width:13px;height:13px;fill:currentColor;flex-shrink:0;opacity:.7}
 .fd-sep{height:1px;background:#eee;margin:3px 0}
 
+#fileToast{position:fixed;left:50%;transform:translateX(-50%) translateY(10px);bottom:22px;
+  z-index:9600;background:#2a2a2a;color:#fff;padding:8px 16px;border-radius:4px;
+  font-family:Arial,sans-serif;font-size:12px;box-shadow:0 4px 18px rgba(0,0,0,.3);
+  opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;max-width:90vw;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#fileToast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+@media print{#fileToast{display:none!important}}
+
 /* ── Proofing panel ── */
 .proof-btn{background:#fff!important;border-color:#ddd!important;padding:0 10px!important;margin-left:4px}
 .proof-btn:hover{background:#fce6f1!important;border-color:#f4a8cc!important;color:var(--rubine)!important}
@@ -755,6 +763,10 @@ body.has-project{padding-left:230px}
     </div>
   </div>
 </div>
+
+<!-- Confirmation that a save landed. Writing to a file handle is silent —
+     no download bar, no dialog — so without this nothing says it happened. -->
+<div id="fileToast"></div>
 
 <!-- Proofing panel — rule-based, no AI, no network -->
 <div class="proof-panel" id="proofPanel">
@@ -4144,6 +4156,15 @@ document.addEventListener('click', e => {
   }, 60);
 }, true);
 
+// Ctrl/Cmd+S saves, which is the whole point of saving back to a real file:
+// without it you would still be going through the File menu every time.
+document.addEventListener('keydown', e => {
+  if ((e.key !== 's' && e.key !== 'S') || !(e.ctrlKey || e.metaKey) || e.altKey) return;
+  e.preventDefault();
+  if (e.shiftKey) { inProject() ? projectSaveAs() : fileSaveAs(); }
+  else            { inProject() ? projectSave()   : fileSave();   }
+}, true);
+
 // Ctrl/Cmd+A selects the whole calculation, not just the page the caret is on.
 //
 // Each page is its own contenteditable, and the browser's own select-all stops
@@ -6032,10 +6053,17 @@ function projectNew() {
   setProjectTitle();
 }
 
-function projectOpen() {
+async function projectOpen() {
   closeFileMenu();
   if (isDirty && !confirm('Unsaved changes will be lost. Continue?')) return;
-  document.getElementById('openProjInput').click();
+  if (!canPickFiles()) { document.getElementById('openProjInput').click(); return; }
+  try {
+    const [handle] = await window.showOpenFilePicker({ types: [PROJ_TYPE], multiple: false });
+    const text = await (await handle.getFile()).text();
+    adoptLoadedProject(JSON.parse(text), handle.name);
+    projHandle = handle;   // Save writes back to the pack that was opened
+    fileHandle = null;
+  } catch (err) { reportFileError('open the project', err); }
 }
 
 function loadProject(input) {
@@ -6045,7 +6073,16 @@ function loadProject(input) {
   const reader = new FileReader();
   reader.onload = e => {
     try {
-      const data = JSON.parse(e.target.result);
+      adoptLoadedProject(JSON.parse(e.target.result), file.name);
+      projHandle = null;   // chosen this way, there is nothing to write back to
+    } catch (err) { alert('Could not open project: ' + err.message); }
+  };
+  reader.readAsText(file);
+}
+
+// Shared by both ways in — the picker and the old file input — so a pack opened
+// either way ends up in the same state.
+function adoptLoadedProject(data, fileName) {
       if (!data || data.kind !== 'calcpad-project' || !Array.isArray(data.checks))
         throw new Error('this is not a CalcPad project file');
       project = {
@@ -6060,7 +6097,7 @@ function loadProject(input) {
       // The file's own name is the pack's identity from here on — it is what
       // the reader sees in the folder, and a stored name left over from a
       // "Save as" under a different one would print in every footer.
-      projectFileName = file.name.replace(/\.peregaproj$/, '');
+      projectFileName = String(fileName).replace(/\.peregaproj$/, '');
       project.name = projectFileName;
       if (!project.checks.length) addCheck('Check 1', null, true);
       else openCheck(data.activeId && project.checks.some(c => c.id === data.activeId)
@@ -6069,30 +6106,56 @@ function loadProject(input) {
       setProjectTitle();
       renderProjectPanel();
       projectAutoSave();
-    } catch (err) { alert('Could not open project: ' + err.message); }
-  };
-  reader.readAsText(file);
 }
 
-function projectSave() {
+async function projectSave() {
   closeFileMenu();
   if (!inProject()) return;
-  if (projectFileName === 'Untitled project') { projectSaveAs(); return; }
-  triggerDownload(projectData(), projectFileName + PROJ_EXT);
-  isDirty = false;
+  if (projHandle) {
+    try {
+      await writeToHandle(projHandle, projectData());
+      isDirty = false;
+      fileToast('Saved to ' + projHandle.name);
+      return;
+    } catch (err) { projHandle = null; }
+  }
+  if (!canPickFiles()) {
+    if (projectFileName === 'Untitled project') { projectSaveAs(); return; }
+    triggerDownload(projectData(), projectFileName + PROJ_EXT);
+    isDirty = false;
+    return;
+  }
+  projectSaveAs();
 }
 
-function projectSaveAs() {
+async function projectSaveAs() {
   closeFileMenu();
   if (!inProject()) return;
-  const name = prompt('Project name:', projectFileName === 'Untitled project' ? '' : projectFileName);
-  if (name === null) return;
-  projectFileName = (name.trim() || 'Untitled project');
-  project.name = projectFileName;
-  triggerDownload(projectData(), projectFileName + PROJ_EXT);
-  isDirty = false;
-  setProjectTitle();
-  renderProjectPanel();
+  if (!canPickFiles()) {
+    const name = prompt('Project name:', projectFileName === 'Untitled project' ? '' : projectFileName);
+    if (name === null) return;
+    projectFileName = (name.trim() || 'Untitled project');
+    project.name = projectFileName;
+    triggerDownload(projectData(), projectFileName + PROJ_EXT);
+    isDirty = false;
+    setProjectTitle();
+    renderProjectPanel();
+    return;
+  }
+  try {
+    const handle = await window.showSaveFilePicker({
+      suggestedName: (projectFileName === 'Untitled project' ? 'Calculation pack' : projectFileName) + PROJ_EXT,
+      types: [PROJ_TYPE],
+    });
+    await writeToHandle(handle, projectData());
+    projHandle = handle;
+    projectFileName = handle.name.replace(/\.peregaproj$/, '');
+    project.name = projectFileName;
+    isDirty = false;
+    setProjectTitle();
+    renderProjectPanel();
+    fileToast('Saved to ' + handle.name);
+  } catch (err) { reportFileError('save the project', err); }
 }
 
 // Leave the pack and carry on with the check that is open as a single document.
@@ -6177,10 +6240,18 @@ function checkSaveAs() {
   const c = activeCheck();
   if (!c) { fileSaveAs(); return; }
   stashActiveCheck();
-  const name = prompt('Save this check as:', c.name);
-  if (name === null) return;
-  triggerDownload(JSON.stringify({ ...c.doc, savedAt: new Date().toISOString() }, null, 2),
-                  (name.trim() || c.name) + '.perega');
+  const data = JSON.stringify({ ...c.doc, savedAt: new Date().toISOString() }, null, 2);
+  if (!canPickFiles()) {
+    const name = prompt('Save this check as:', c.name);
+    if (name === null) return;
+    triggerDownload(data, (name.trim() || c.name) + '.perega');
+    return;
+  }
+  // Deliberately does not become the document's save target: this is a copy
+  // taken out of the pack, and Save still belongs to the pack.
+  window.showSaveFilePicker({ suggestedName: c.name + '.perega', types: [PEREGA_TYPE] })
+    .then(h => writeToHandle(h, data).then(() => fileToast('Saved to ' + h.name)))
+    .catch(err => reportFileError('save the check', err));
 }
 
 function openCheck(id) {
@@ -6504,32 +6575,126 @@ function saveScopeChoose(choice) {
   else if (choice === 'check') { checkSaveAs(); }
 }
 
-function fileSave() {
+// ── Saving to a real place on disk ─────────────────────────────
+// Chrome and Edge can show a proper Save-as dialog and hand back a handle on
+// the chosen file, which later saves write straight back to — so Save means
+// save, to the job folder, not another copy in Downloads. Firefox and Safari
+// have no such API, so everything below falls back to the download the app has
+// always done, and nothing is worse than it was.
+const canPickFiles = () => typeof window.showSaveFilePicker === 'function';
+const PEREGA_TYPE = { description: 'CalcPad calculation', accept: { 'application/json': ['.perega'] } };
+const PROJ_TYPE   = { description: 'CalcPad project',     accept: { 'application/json': ['.peregaproj'] } };
+
+// The file this document or project came from, while the browser can hold one.
+// Lost on reload — a handle cannot outlive the page without being stored and
+// re-permitted — so after a refresh the first Save asks where to put it again.
+let fileHandle = null;
+let projHandle = null;
+
+async function writeToHandle(handle, data) {
+  const w = await handle.createWritable();
+  await w.write(data);
+  await w.close();
+}
+
+// Writing to a handle is silent — no download bar, no dialog — so without this
+// there is nothing to tell you the save happened.
+let _toastT = null;
+function fileToast(msg) {
+  const el = document.getElementById('fileToast');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(_toastT);
+  _toastT = setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+// A cancelled picker is not a failure — the user changed their mind.
+function reportFileError(what, err) {
+  if (err && (err.name === 'AbortError' || err.name === 'NotAllowedError')) return;
+  alert('Could not ' + what + ': ' + ((err && err.message) || 'unknown error'));
+}
+
+async function fileSave() {
   closeFileMenu();
   if (inProject()) { askSaveScope('save'); return; }
-  if (currentFileName === 'Untitled') { fileSaveAs(); return; }
-  triggerDownload(buildSaveData(), currentFileName + '.perega');
-  isDirty = false;
+  if (fileHandle) {
+    try {
+      await writeToHandle(fileHandle, buildSaveData());
+      isDirty = false;
+      fileToast('Saved to ' + fileHandle.name);
+      return;
+    } catch (err) {
+      // The file moved, or permission lapsed. Fall through and ask again rather
+      // than reporting a save that did not happen.
+      fileHandle = null;
+    }
+  }
+  if (!canPickFiles()) {
+    if (currentFileName === 'Untitled') { fileSaveAs(); return; }
+    triggerDownload(buildSaveData(), currentFileName + '.perega');
+    isDirty = false;
+    return;
+  }
+  fileSaveAs();
 }
-function fileSaveAs() {
+
+async function fileSaveAs() {
   closeFileMenu();
   if (inProject()) { askSaveScope('saveas'); return; }
-  let name = prompt('Save as:', currentFileName); if (name === null) return;
-  currentFileName = name.replace(/\.perega$/, '') || 'Untitled';
-  triggerDownload(buildSaveData(), currentFileName + '.perega'); isDirty = false;
+  if (!canPickFiles()) {
+    const name = prompt('Save as:', currentFileName); if (name === null) return;
+    currentFileName = name.replace(/\.perega$/, '') || 'Untitled';
+    triggerDownload(buildSaveData(), currentFileName + '.perega');
+    isDirty = false;
+    document.title = currentFileName + ' — CalcPad';
+    return;
+  }
+  try {
+    const handle = await window.showSaveFilePicker({
+      suggestedName: (currentFileName === 'Untitled' ? 'Calculation' : currentFileName) + '.perega',
+      types: [PEREGA_TYPE],
+    });
+    await writeToHandle(handle, buildSaveData());
+    fileHandle = handle;
+    currentFileName = handle.name.replace(/\.perega$/, '');
+    isDirty = false;
+    document.title = currentFileName + ' — CalcPad';
+    fileToast('Saved to ' + handle.name);
+  } catch (err) { reportFileError('save the file', err); }
+}
+
+// Shared by both ways in, so a file opened through the picker and one opened
+// through the old file input end up in exactly the same state.
+function adoptLoadedDoc(data, name) {
+  applyDoc({ pages: data.pages || [data.content || ''],
+             meta: data.meta, preferredUnits: data.preferredUnits });
+  currentFileName = String(name || 'Untitled').replace(/\.perega$/, '');
+  isDirty = false;
   document.title = currentFileName + ' — CalcPad';
 }
-function fileOpen() { closeFileMenu(); if (isDirty && !confirm('Unsaved changes will be lost. Continue?')) return; document.getElementById('openFileInput').click(); }
+
+async function fileOpen() {
+  closeFileMenu();
+  if (isDirty && !confirm('Unsaved changes will be lost. Continue?')) return;
+  if (!canPickFiles()) { document.getElementById('openFileInput').click(); return; }
+  try {
+    const [handle] = await window.showOpenFilePicker({ types: [PEREGA_TYPE], multiple: false });
+    const text = await (await handle.getFile()).text();
+    adoptLoadedDoc(JSON.parse(text), handle.name);
+    // Opening through the picker also gives us somewhere to save back to, so
+    // Save after an edit writes over the file that was opened.
+    fileHandle = handle;
+    projHandle = null;
+  } catch (err) { reportFileError('open the file', err); }
+}
 function loadFile(input) {
   const file = input.files[0]; if (!file) return;
   const reader = new FileReader();
   reader.onload = e => {
     try {
-      const data = JSON.parse(e.target.result);
-      applyDoc({ pages: data.pages || [data.content || ''],
-                 meta: data.meta, preferredUnits: data.preferredUnits });
-      currentFileName = file.name.replace(/\.perega$/, '');
-      isDirty = false; document.title = currentFileName + ' — CalcPad';
+      adoptLoadedDoc(JSON.parse(e.target.result), file.name);
+      fileHandle = null;   // a file chosen this way cannot be written back to
     } catch(err) { alert('Could not open file: ' + err.message); }
   };
   reader.readAsText(file); input.value = '';
