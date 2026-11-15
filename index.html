@@ -369,6 +369,10 @@ body.has-project{padding-left:230px}
    default is 1.21em, which made variable chips jump in size next to formula
    chips and whenever one became the other. */
 .formula-chip .katex,.var-def-chip .katex{font-size:1em}
+/* PLOT(...) and SECTION(...) lines: a drawing redrawn from the values on every rebuild; click to edit */
+.plot-chip{display:inline-block;max-width:100%;vertical-align:top;margin:4px 0;cursor:pointer;color:var(--ink,#222)}
+.plot-chip svg{max-width:100%;height:auto;display:block}
+.plot-chip .plot-err{color:var(--rubine);font-style:italic}
 .formula-chip.error{color:var(--rubine);font-style:italic}
 /* Brief highlight on an existing chip when a duplicate definition is attempted */
 .chip-flash{outline:2px solid var(--rubine);outline-offset:1px;border-radius:2px}
@@ -518,7 +522,7 @@ body.has-project{padding-left:230px}
   /* Inner layout intentionally NOT overridden — inherits screen px metrics for WYSIWYG. */
   .calc-table thead{display:table-header-group}
   .calc-table tr{break-inside:avoid;page-break-inside:avoid}
-  .formula-chip,.var-def-chip{break-inside:avoid}
+  .formula-chip,.var-def-chip,.plot-chip{break-inside:avoid}
   h1,h2,h3{break-after:avoid}
 }
 </style>
@@ -677,6 +681,8 @@ body.has-project{padding-left:230px}
     <div class="hpill"><code>= expr [mm]</code> → output unit</div>
     <div class="hpill"><code>[#MPa]</code> → force unit, no check</div>
     <div class="hpill"><code>f_ck[#MPa]</code> → value as a plain number</div>
+    <div class="hpill"><code>PLOT(w*x*(L - x)/2, x, 0, L) [kNm]</code> → graph</div>
+    <div class="hpill"><code>SECTION(b, h, c_nom, n, phi)</code> → section</div>
   </div>
 </div>
 
@@ -919,6 +925,25 @@ body.has-project{padding-left:230px}
           them: <code>v[#MPa]*b[#mm]*d[#mm] [#N]</code>
           works, and so does plain <code>v*b*d [kN]</code>,
           but mixing the two does not.</div>
+      </div>
+      <div class="sref">
+        <div class="sref-t">Plots</div>
+        <div class="sref-i"><span>PLOT(w*x*(L - x)/2, x, 0, L) [kNm]</span></div>
+        <div class="sref-d">On a line of its own: a graph of the
+          expression as x runs from 0 to L, redrawn whenever a
+          value above it changes. Up to four curves, separated
+          by ; and [unit] sets the unit plotted. The largest
+          value of each curve is marked.</div>
+        <div class="sref-i"><span>SECTION(b, h, c_nom, n, phi)</span></div>
+        <div class="sref-d">A concrete section: b × h, n bottom bars
+          of diameter phi at cover c_nom. Add any of
+          <code>link: phi_w</code>, <code>top: 2</code>,
+          <code>phitop: 12 mm</code>, <code>bw: b_w</code> and
+          <code>hf: h_f</code> (a flanged section),
+          <code>x: x_u</code> (the neutral axis, with the strain
+          and the stress block) and <code>hog: 1</code>
+          (compression at the bottom).</div>
+        <div class="sref-d">Click a plot to edit its line.</div>
       </div>
       <div class="sref">
         <div class="sref-t">Functions</div>
@@ -2867,7 +2892,7 @@ function startNextPageOnEnter(ed, e) {
   rest.selectNodeContents(ed);
   try { rest.setStart(r.endContainer, r.endOffset); } catch (err) { return false; }
   if (rest.toString().trim() !== '') return false;
-  if (rest.cloneContents().querySelector('img, .calc-img-wrap, table, .formula-chip, .var-def-chip'))
+  if (rest.cloneContents().querySelector('img, .calc-img-wrap, table, .formula-chip, .var-def-chip, .plot-chip'))
     return false;
 
   // Is there room for one more line? That is the question the typist is asking,
@@ -3277,7 +3302,7 @@ function splitNodeAtHeight(node, maxH, edTop) {
   // A table row is atomic too: splitting through one used to recurse into the
   // cells and leave an empty row behind on each side of the break, plus a stray
   // one-row table. A table breaks between rows or not at all.
-  if (node.matches && node.matches('img, .calc-img-wrap, .formula-chip, .var-def-chip, tr'))
+  if (node.matches && node.matches('img, .calc-img-wrap, .formula-chip, .var-def-chip, .plot-chip, tr'))
     return null;
 
   // A table that would leave almost nothing behind is better moved whole than
@@ -3400,7 +3425,7 @@ function _pullBackFromNext(edEl, contEl) {
   // out from under them and puts the caret back where it came from.
   const nextIsEmpty = !nextEdEl.hasChildNodes() ||
     (!nextEdEl.textContent.trim() &&
-     !nextEdEl.querySelector('img,.calc-img-wrap,.formula-chip,.var-def-chip'));
+     !nextEdEl.querySelector('img,.calc-img-wrap,.formula-chip,.var-def-chip,.plot-chip'));
   const caretIsThere = document.activeElement === nextEdEl ||
     (() => { const s = window.getSelection();
              return s.rangeCount && nextEdEl.contains(s.getRangeAt(0).startContainer); })();
@@ -3685,6 +3710,208 @@ function getAllEditors() {
 // Override rebuildVars to scan all editors in document order (vars then formulas interleaved)
 // seed carries what the previous pass managed to resolve — see the retry at the
 // end of this function.
+// ══ PLOTS AND SECTIONS ═════════════════════════════════════════
+// A line of its own
+//   PLOT(expr, x, from, to) [unit]           draws expr against x from "from" to "to" (several curves: expr1; expr2)
+//   SECTION(b, h, c, n, phi, key: value, …)  draws a concrete section with its bars (keys below)
+// becomes a chip that keeps its own text (data-plot) and is redrawn from the current values at the end of every
+// rebuild, so it follows any change above it, prints and saves with the document. Click it to edit the line.
+// Values are SI inside, like every variable; [unit] (or [#unit]) sets the unit of the plotted values.
+const PLOT_RE = /^\s*(PLOT|SECTION)\s*\(([\s\S]*)\)\s*(?:\[([^\]]*)\])?\s*$/i;
+const PLOT_COLOURS = ['#1d5fbf', '#c4242a', '#247b50', '#a15c07'];
+let _plotClipId = 0;
+function parsePlotLine(text) {
+  const m = PLOT_RE.exec(text || '');
+  if (!m) return null;
+  // the brackets must balance, so "PLOT(a) and (b)" stays prose
+  let depth = 0; for (const ch of m[2]) { if (ch === '(') depth++; else if (ch === ')' && --depth < 0) return null; }
+  return depth ? null : { kind: m[1].toUpperCase(), args: m[2], unit: (m[3] || '').trim(), src: text.trim() };
+}
+// split at a separator outside brackets
+function splitTop(s, seps) {
+  const out = []; let depth = 0, cur = '';
+  for (const ch of s) {
+    if (ch === '(' || ch === '[') depth++; else if (ch === ')' || ch === ']') depth--;
+    if (depth === 0 && seps.includes(ch)) { out.push(cur.trim()); cur = ''; } else cur += ch;
+  }
+  out.push(cur.trim());
+  return out;
+}
+function makePlotChip(src) {
+  const chip = document.createElement('span');
+  chip.className = 'plot-chip';
+  chip.contentEditable = 'false';
+  chip.dataset.plot = src;
+  renderPlotChip(chip);
+  return chip;
+}
+// a plot's drawing as PNG bytes (for Word), at twice its size, on white
+function plotToPng(svg) {
+  return new Promise((res, rej) => {
+    if (!svg) { rej(new Error('no drawing')); return; }
+    const w = +svg.getAttribute('width'), h = +svg.getAttribute('height'), k = 2;
+    const src = svg.outerHTML.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ').replace(/fill="currentColor"/, 'fill="#222"').replace(/font-family="inherit"/, 'font-family="Arial, sans-serif"');
+    const img = new Image();
+    img.onload = () => { const c = document.createElement('canvas'); c.width = w * k; c.height = h * k; const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(img, 0, 0, c.width, c.height);
+      const bin = atob(c.toDataURL('image/png').split(',')[1]), bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      res({ bytes, w: Math.min(w, 600), h: Math.round(h * Math.min(w, 600) / w) }); };
+    img.onerror = () => rej(new Error('could not draw'));
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(src);
+  });
+}
+function renderPlots() { document.querySelectorAll('.calc-area .plot-chip').forEach(renderPlotChip); }
+function startEditPlotChip(chip) {
+  const textNode = document.createTextNode(chip.dataset.plot || '');
+  chip.parentNode.replaceChild(textNode, chip);
+  caretAtEndOf(textNode);
+}
+// a line typed or pasted as a plot: the chip and a line break, then a rebuild draws it
+function commitPlotLine(textNode, src) {
+  _editCommitPending = true; setTimeout(() => { _editCommitPending = false; }, 500);
+  const chip = makePlotChip(src), spacer = document.createTextNode(' ');
+  textNode.parentNode.replaceChild(chip, textNode);
+  chip.after(spacer);
+  const r = document.createRange(); r.setStartAfter(spacer); r.collapse(true);
+  const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+  rebuildVars();
+}
+// the value of an expression (SI), with x set as given
+function plotEval(expr, v) {
+  const r = parseFloat(String(evalFormula(expr, v)).replace(/,/g, ''));
+  if (!isFinite(r)) throw new Error('"' + expr + '" does not give a number');
+  return r;
+}
+// the unit to show a value in: the [unit] given, the unit of a variable named on its own, or the unit worked out
+function plotUnitSpec(spec) {
+  const d = displayUnitSpec(spec);
+  if (!d.unit) return { f: 1, label: '' };
+  const f = getUnitConversionFactor(parseUnitStr(d.unit));
+  if (f === null) throw new Error('[' + d.unit + '] is not a unit CalcPad knows');
+  return { f, label: d.unit };
+}
+function plotUnitOf(expr, units) {
+  const name = String(expr).trim();
+  if (/^[A-Za-z][A-Za-z0-9_]*$/.test(name)) {
+    const chip = document.querySelector(`.var-def-chip[data-var-name="${CSS.escape(name)}"]`);
+    if (chip) {
+      const u = (chip.dataset.varDisplayUnit && displayUnitSpec(chip.dataset.varDisplayUnit).unit) || (!chip.dataset.varExpr && chip.dataset.varUnit) || '';
+      if (u) { const f = getUnitConversionFactor(parseUnitStr(u)); if (f !== null) return { f, label: u }; }
+    }
+  }
+  let u = null; try { u = evalUnitExpr(expr, units); } catch (e) { u = null; }
+  if (!u || !Object.keys(u).length) return { f: 1, label: '' };
+  const simpl = simplifyUnitStr(u), base = simpl ? parseUnitStr(simpl) : unitObjToSIBase(u), pref = applyUnitPreferences(base);
+  const f = getUnitConversionFactor(pref);
+  return f === null ? { f: 1, label: unitObjToStr(u) } : { f, label: unitObjToStr(pref) };
+}
+// round steps for an axis: 1, 2, 2.5 or 5 × 10^k
+function plotTicks(lo, hi, n) {
+  if (!(hi > lo)) { const p = Math.abs(lo) || 1; lo -= p / 2; hi += p / 2; }
+  const raw = (hi - lo) / n, mag = Math.pow(10, Math.floor(Math.log10(raw))), step = [1, 2, 2.5, 5, 10].map(k => k * mag).find(s => s >= raw * 0.999);
+  const a = Math.floor(lo / step + 1e-9) * step, b = Math.ceil(hi / step - 1e-9) * step, t = [];
+  for (let v = a; v <= b + step / 2; v += step) t.push(Math.abs(v) < step * 1e-9 ? 0 : v);
+  return t;
+}
+const plotFmt = v => { const a = Math.abs(v); return a !== 0 && (a >= 1e5 || a < 1e-3) ? v.toPrecision(3) : fmtNumDisplay(v); };
+const svgEsc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function renderPlotChip(chip) {
+  const p = parsePlotLine(chip.dataset.plot || '');
+  try {
+    if (!p) throw new Error('write PLOT(expr, x, from, to) or SECTION(b, h, c, n, phi)');
+    chip.innerHTML = p.kind === 'PLOT' ? plotSVG(p) : sectionSVG(p);
+    chip.classList.remove('error'); chip.title = 'Click to edit: ' + p.src;
+  } catch (e) {
+    chip.classList.add('error');
+    chip.innerHTML = `<span class="plot-err">${svgEsc((p ? p.kind : 'PLOT') + ': ' + (e.message || e))}</span>`;
+    chip.title = 'Click to edit: ' + (chip.dataset.plot || '');
+  }
+}
+function plotSVG(p) {
+  const a = splitTop(p.args, ',');
+  if (a.length !== 4) throw new Error('give the expression, the variable, and where it starts and ends: PLOT(expr, x, from, to)');
+  const [exprs, xn, fromE, toE] = a, curves = splitTop(exprs, ';').filter(Boolean);
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(xn)) throw new Error('"' + xn + '" is not a variable name to plot against');
+  if (!curves.length || curves.length > PLOT_COLOURS.length) throw new Error('give one to ' + PLOT_COLOURS.length + ' expressions, separated by ;');
+  const x0 = plotEval(fromE, vars), x1 = plotEval(toE, vars);
+  if (!(x1 > x0)) throw new Error('the range must run upwards: ' + fromE + ' to ' + toE);
+  const xu = plotUnitOf(toE, varUnits), xSI = (() => { try { const u = evalUnitExpr(toE, varUnits); return u && Object.keys(u).length ? unitObjToStr(u) : ''; } catch (e) { return ''; } })();
+  const unitsX = { ...varUnits }; if (xSI) unitsX[xn] = xSI; else delete unitsX[xn];
+  const yu = p.unit ? plotUnitSpec(p.unit) : plotUnitOf(curves[0], unitsX);
+  const N = 200, data = curves.map(ex => { const pts = []; for (let i = 0; i <= N; i++) { const x = x0 + (x1 - x0) * i / N; pts.push([x / xu.f, plotEval(ex, { ...vars, [xn]: x }) / yu.f]); } return pts; });
+  const ys = data.flat().map(q => q[1]), yt = plotTicks(Math.min(0, ...ys), Math.max(0, ...ys), 5), xt = plotTicks(x0 / xu.f, x1 / xu.f, 6);
+  const W = 560, H = 270, L = 62, R = 14, T = 14 + (curves.length > 1 ? 16 * curves.length : 0), B = 38;
+  const X = v => L + (v - xt[0]) / (xt[xt.length - 1] - xt[0]) * (W - L - R), Y = v => H - B - (v - yt[0]) / (yt[yt.length - 1] - yt[0]) * (H - T - B);
+  let g = '';
+  yt.forEach(v => { g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="${v === 0 ? '#666' : '#e3e6ea'}" stroke-width="${v === 0 ? 1 : 0.8}"/><text x="${L - 6}" y="${Y(v) + 4}" text-anchor="end">${svgEsc(plotFmt(v))}</text>`; });
+  xt.forEach(v => { g += `<line x1="${X(v)}" x2="${X(v)}" y1="${T}" y2="${H - B}" stroke="#e3e6ea" stroke-width="0.8"/><text x="${X(v)}" y="${H - B + 15}" text-anchor="middle">${svgEsc(plotFmt(v))}</text>`; });
+  g += `<rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="none" stroke="#999" stroke-width="0.8"/>`;
+  data.forEach((pts, k) => {
+    g += `<polyline fill="none" stroke="${PLOT_COLOURS[k]}" stroke-width="2" stroke-linejoin="round" points="${pts.map(q => X(q[0]).toFixed(1) + ',' + Y(q[1]).toFixed(1)).join(' ')}"/>`;
+    // the largest value of each curve, marked and labelled
+    const m = pts.reduce((b, q) => Math.abs(q[1]) > Math.abs(b[1]) ? q : b, pts[0]), right = X(m[0]) > W - 150;
+    g += `<circle cx="${X(m[0])}" cy="${Y(m[1])}" r="3.5" fill="${PLOT_COLOURS[k]}"/><text x="${X(m[0]) + (right ? -7 : 7)}" y="${Y(m[1]) + (m[1] >= 0 ? -6 : 14)}" text-anchor="${right ? 'end' : 'start'}" font-weight="600">${svgEsc(plotFmt(m[1]) + (yu.label ? ' ' + yu.label : ''))} at ${svgEsc(xn)} = ${svgEsc(plotFmt(m[0]))}</text>`;
+  });
+  if (curves.length > 1) curves.forEach((ex, k) => { g += `<line x1="${L}" x2="${L + 18}" y1="${10 + 16 * k}" y2="${10 + 16 * k}" stroke="${PLOT_COLOURS[k]}" stroke-width="2.5"/><text x="${L + 24}" y="${14 + 16 * k}">${svgEsc(ex)}</text>`; });
+  g += `<text x="${(L + W - R) / 2}" y="${H - 6}" text-anchor="middle">${svgEsc(xn)}${xu.label ? ' [' + svgEsc(xu.label) + ']' : ''}</text>`;
+  if (yu.label) g += `<text x="12" y="${(T + H - B) / 2}" text-anchor="middle" transform="rotate(-90 12 ${(T + H - B) / 2})">[${svgEsc(yu.label)}]</text>`;
+  return `<svg class="plot-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" font-size="11" font-family="inherit" fill="currentColor" role="img" aria-label="${svgEsc(p.src)}">${g}</svg>`;
+}
+// SECTION(b, h, c, n, phi, link: phi_w, top: n_t, phitop: phi_t, bw: b_w, hf: h_f, x: x, hog: 1)
+//   b, h: overall width and depth; c: nominal cover (to the links when link is given); n, phi: the bottom bars;
+//   top, phitop: the top bars (phitop defaults to phi); bw, hf: a flanged section (b the flange, bw the web);
+//   x: the neutral axis depth, from the compression face (the top; the bottom when hog: 1), drawn with the strain
+//   and the stress block (ε_cu2 = 3.5‰, 0.8x).
+function sectionSVG(p) {
+  const pos = [], opt = {};
+  for (const arg of splitTop(p.args, ',;')) {
+    const m = /^([A-Za-z]+)\s*:\s*([\s\S]+)$/.exec(arg);
+    if (m) opt[m[1].toLowerCase()] = m[2]; else if (arg) pos.push(arg);
+  }
+  if (pos.length !== 5) throw new Error('give b, h, c, n and phi: SECTION(b, h, c, n, phi), then any of link:, top:, phitop:, bw:, hf:, x:, hog:');
+  const mm = e => plotEval(e, vars) * 1000, cnt = e => Math.round(plotEval(e, vars));
+  const b = mm(pos[0]), h = mm(pos[1]), c = mm(pos[2]), n = cnt(pos[3]), phi = mm(pos[4]);
+  const lk = opt.link ? mm(opt.link) : 0, nt = opt.top ? cnt(opt.top) : 0, phiT = opt.phitop ? mm(opt.phitop) : phi;
+  const bw = opt.bw ? mm(opt.bw) : b, hf = opt.hf ? mm(opt.hf) : 0, x = opt.x ? mm(opt.x) : null, hog = opt.hog ? plotEval(opt.hog, vars) > 0 : false;
+  if (!(b > 0 && h > 0 && bw > 0 && bw <= b + 1e-6)) throw new Error('b and h must be positive, and bw not wider than b');
+  if (!(c >= 0 && n >= 0 && phi > 0)) throw new Error('c, n and phi must be positive');
+  const flanged = hf > 0 && bw < b - 1e-6;
+  const s = Math.min(230 / b, 260 / h), ox = 70, oy = 26, X = v => ox + v * s, Y = v => oy + v * s;
+  const wl = (b - bw) / 2, wr = wl + bw;        // the web, centred
+  const outline = flanged ? `${X(0)},${Y(0)} ${X(b)},${Y(0)} ${X(b)},${Y(hf)} ${X(wr)},${Y(hf)} ${X(wr)},${Y(h)} ${X(wl)},${Y(h)} ${X(wl)},${Y(hf)} ${X(0)},${Y(hf)}`
+    : `${X(0)},${Y(0)} ${X(b)},${Y(0)} ${X(b)},${Y(h)} ${X(0)},${Y(h)}`, clip = 'plotclip' + (++_plotClipId);
+  let g = `<defs><clipPath id="${clip}"><polygon points="${outline}"/></clipPath></defs><polygon points="${outline}" fill="#eef0f3" stroke="#333" stroke-width="1.3"/>`;
+  if (x !== null && x > 0) {                     // the compression zone, cut to the outline
+    const yy = Math.min(x, h);
+    g += `<rect x="${X(0)}" y="${Y(hog ? h - yy : 0)}" width="${b * s}" height="${yy * s}" fill="#1d5fbf" fill-opacity="0.14" clip-path="url(#${clip})"/>`;
+  }
+  if (lk > 0) g += `<rect x="${X(wl + c + lk / 2)}" y="${Y(c + lk / 2)}" width="${Math.max(0, bw - 2 * c - lk) * s}" height="${Math.max(0, h - 2 * c - lk) * s}" rx="${3 * lk * s}" fill="none" stroke="#555" stroke-width="${Math.max(1, lk * s)}"/>`;
+  const row = (k, d, yc) => { if (!(k > 0)) return ''; const x1 = wl + c + lk + d / 2, x2 = wr - c - lk - d / 2; let t = ''; for (let i = 0; i < k; i++) { const xc = k === 1 ? (x1 + x2) / 2 : x1 + (x2 - x1) * i / (k - 1); t += `<circle cx="${X(xc)}" cy="${Y(yc)}" r="${Math.max(1.8, d * s / 2)}" fill="#222"/>`; } return t; };
+  const yb = h - c - lk - phi / 2, yt = c + lk + phiT / 2;
+  g += row(n, phi, yb) + row(nt, phiT, yt);
+  // dimensions
+  const dim = (x1, y1, x2, y2, label, side) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#777" stroke-width="0.8"/><text x="${side === 'v' ? x1 - 6 : (x1 + x2) / 2}" y="${side === 'v' ? (y1 + y2) / 2 + 4 : y1 - 5}" text-anchor="${side === 'v' ? 'end' : 'middle'}">${label}</text>`;
+  const f0 = v => fmtNumDisplay(Math.round(v * 10) / 10);
+  g += dim(X(0), Y(0) - 10, X(b), Y(0) - 10, `${flanged ? 'b_eff' : 'b'} = ${f0(b)}`, 'h') + dim(X(0) - 14, Y(0), X(0) - 14, Y(h), `h = ${f0(h)}`, 'v');
+  if (flanged) g += `<text x="${X(wl + bw / 2)}" y="${Y(h) + 16}" text-anchor="middle">b_w = ${f0(bw)}</text><text x="${X(b) + 6}" y="${Y(hf / 2) + 4}">h_f = ${f0(hf)}</text>`;
+  const lab = [n ? `${n} φ${f0(phi)} bottom` : '', nt ? `${nt} φ${f0(phiT)} top` : '', lk ? `φ${f0(lk)} links` : '', `cover ${f0(c)}`].filter(Boolean).join(' · ');
+  g += `<text x="${X(b / 2)}" y="${Y(h) + (flanged ? 32 : 18)}" text-anchor="middle">${svgEsc(lab)}</text>`;
+  let W = X(b) + (flanged ? 60 : 24);
+  if (x !== null && x > 0) {
+    const ycf = hog ? h : 0, dir = hog ? -1 : 1, yna = ycf + dir * x, dT = hog ? yt : yb, dd = Math.abs(dT - ycf);
+    g += `<line x1="${X(0) - 4}" x2="${X(b) + 4}" y1="${Y(yna)}" y2="${Y(yna)}" stroke="#1d5fbf" stroke-dasharray="5 3"/><text x="${X(b) + 6}" y="${Y(yna) + (flanged && !hog ? 14 : 4)}" fill="#1d5fbf">x = ${f0(x)}</text>`;
+    // strain: ε_cu2 at the compression face, 0 at the axis, ε_s at the tension steel; stress: 0.8x deep block
+    const sx = W + 40, k = 34 / 3.5, es = 3.5 * (dd - x) / x;   // ‰
+    g += `<line x1="${sx}" x2="${sx}" y1="${Y(0)}" y2="${Y(h)}" stroke="#777"/><polygon points="${sx},${Y(ycf)} ${sx - 3.5 * k},${Y(ycf)} ${sx},${Y(yna)} ${sx + Math.min(es, 12) * k},${Y(dT)} ${sx},${Y(dT)}" fill="#c4242a" fill-opacity="0.15" stroke="#c4242a"/>`;
+    g += `<text x="${sx - 3.5 * k}" y="${Y(ycf) + (hog ? 14 : -5)}" text-anchor="middle">ε_cu2 3.5‰</text><text x="${sx + Math.min(es, 12) * k + 4}" y="${Y(dT) + 4}">ε_s ${fmtNumDisplay(Math.round(es * 100) / 100)}‰</text>`;
+    const bx = sx + 90, d8 = 0.8 * x;
+    g += `<line x1="${bx}" x2="${bx}" y1="${Y(0)}" y2="${Y(h)}" stroke="#777"/><rect x="${bx - 30}" y="${Y(hog ? h - d8 : 0)}" width="30" height="${d8 * s}" fill="#1d5fbf" fill-opacity="0.25" stroke="#1d5fbf"/><text x="${bx - 34}" y="${Y(hog ? h - d8 / 2 : d8 / 2) + 4}" text-anchor="end">0.8x</text><text x="${bx - 15}" y="${Y(hog ? h : 0) + (hog ? 14 : -5)}" text-anchor="middle">ηf_cd</text>`;
+    g += `<text x="${sx}" y="${Y(h) + 18}" text-anchor="middle">strain</text><text x="${bx - 15}" y="${Y(h) + 18}" text-anchor="middle">stress</text>`;
+    W = Math.max(bx + 24, sx + Math.min(es, 12) * k + 70);
+  }
+  const H = Y(h) + (flanged ? 40 : 28);
+  return `<svg class="plot-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" font-size="11" font-family="inherit" fill="currentColor" role="img" aria-label="${svgEsc(p.src)}">${g}</svg>`;
+}
+
 function rebuildVars(seed) {
   _rebuildActive = true;
   vars = seed ? { ...seed.vars } : {};
@@ -3829,6 +4056,7 @@ function rebuildVars(seed) {
     return;
   }
   _rebuildPromoted = false;
+  renderPlots();
   renderSidebar();
   // Only the innermost pass of a retry chain reaches here, so this runs once
   // per settled rebuild rather than once per attempt.
@@ -3938,7 +4166,7 @@ document.addEventListener('keydown', e => {
     const wrap = ed.closest('.page-wrap');
     const prevWrap = wrap && wrap.previousElementSibling;
     const isEmpty = !ed.textContent.trim() &&
-      !ed.querySelector('img, .calc-img-wrap, table, .formula-chip, .var-def-chip');
+      !ed.querySelector('img, .calc-img-wrap, table, .formula-chip, .var-def-chip, .plot-chip');
     if (isEmpty && prevWrap && prevWrap.classList.contains('page-wrap')) {
       e.preventDefault();
       const prevEd = prevWrap.querySelector('.calc-area');
@@ -3975,6 +4203,9 @@ document.addEventListener('keydown', e => {
     if (node.nodeType !== Node.TEXT_NODE) return;
     if (!ed.contains(node)) return;
     const fullText = node.textContent.trim();
+    // A plot or section on a line of its own (before the definitions: its "key: value" pairs are not definitions)
+    const pl = parsePlotLine(fullText);
+    if (pl) { e.preventDefault(); commitPlotLine(node, pl.src); return; }
     // Several definitions separated by semicolons: "b = 200 mm; h = 400 mm".
     // Only when every part is one, so prose containing a semicolon stays prose.
     const segs = definitionSegments(node.textContent);   // untrimmed: keeps the leading spacer
@@ -4102,7 +4333,7 @@ function caretRangeAt(x, y) {
 document.addEventListener('pointerdown', e => {
   const ed = e.target && e.target.closest ? e.target.closest('.calc-area') : null;
   if (!ed || !ed.hasChildNodes()) return;
-  if (e.target.closest('.formula-chip,.var-def-chip,.calc-table,img,.calc-img-wrap,input,button,select,textarea')) return;
+  if (e.target.closest('.formula-chip,.var-def-chip,.plot-chip,.calc-table,img,.calc-img-wrap,input,button,select,textarea')) return;
   // Work from the visual line the press is level with, measured across the whole
   // editor. Looking at block children alone missed lines that sit in the editor
   // as bare text, and collapsing to a block's end overshot when it wrapped.
@@ -4120,7 +4351,7 @@ document.addEventListener('pointerdown', e => {
   if (!rng) return;
   let node = rng.startContainer;
   if (node.nodeType !== Node.ELEMENT_NODE) node = node.parentElement;
-  const chip = node && node.closest ? node.closest('.formula-chip,.var-def-chip') : null;
+  const chip = node && node.closest ? node.closest('.formula-chip,.var-def-chip,.plot-chip') : null;
   if (chip) rng.setStartAfter(chip);         // never land inside a chip
   rng.collapse(true);
   const sel = window.getSelection();
@@ -4507,6 +4738,11 @@ function cancelFormula() {
   _editCommitPending = true; setTimeout(() => { _editCommitPending = false; }, 500);
 }
 
+// Click a plot to edit its line
+document.addEventListener('click', e => {
+  const chip = e.target.closest('.plot-chip');
+  if (chip && chip.closest('.calc-area')) { e.preventDefault(); startEditPlotChip(chip); }
+});
 // Click a formula chip to expand it back to editable text
 document.addEventListener('click', e => {
   const chip = e.target.closest('.formula-chip');
@@ -4670,6 +4906,9 @@ function pasteLineToFragment(rawLine, wvars, wunits) {
   const frag = document.createDocumentFragment();
   const trimmed = rawLine.trim();
   if (!trimmed) return frag; // blank line — the <br> between lines provides the break
+  // A plot or section: drawn by the rebuild that follows every paste
+  const pl = parsePlotLine(trimmed);
+  if (pl) { frag.appendChild(makePlotChip(pl.src)); frag.appendChild(document.createTextNode(' ')); return frag; }
 
   // Semicolon-separated definitions on one pasted line, same as typing them.
   const segs = definitionSegments(trimmed);
@@ -4835,6 +5074,7 @@ function chunkPlainText(root) {
     if (node.nodeType !== Node.ELEMENT_NODE) return;
     if (node.classList.contains('var-def-chip')) { out += varChipExportText(node); return; }
     if (node.classList.contains('formula-chip')) { out += formulaChipExportText(node); return; }
+    if (node.classList.contains('plot-chip')) { out += node.dataset.plot || ''; return; }
     if (node.tagName === 'BR') { out += '\n'; return; }
     if (node.tagName === 'TD' || node.tagName === 'TH') {
       for (const c of node.childNodes) walk(c);
@@ -4920,7 +5160,7 @@ function sanitisePastedChunk(html) {
     });
     el.removeAttribute('data-reflow-split');
     el.removeAttribute('data-tbl-handlers');
-    if (el.classList.contains('var-def-chip') || el.classList.contains('formula-chip')) {
+    if (el.classList.contains('var-def-chip') || el.classList.contains('formula-chip') || el.classList.contains('plot-chip')) {
       el.classList.remove('chip-flash', 'dup-name');
       el.contentEditable = 'false';
     }
@@ -5811,7 +6051,7 @@ function proofTextNodes() {
       acceptNode(n) {
         if (!n.nodeValue || !/[A-Za-z]/.test(n.nodeValue)) return NodeFilter.FILTER_REJECT;
         const el = n.parentElement;
-        if (el && el.closest('.var-def-chip, .formula-chip, .katex')) return NodeFilter.FILTER_REJECT;
+        if (el && el.closest('.var-def-chip, .formula-chip, .plot-chip, .katex')) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       },
     });
@@ -6792,6 +7032,8 @@ async function exportWord() {
   try { await loadDocx(); }
   catch (e) { alert('Word export needs to download a component and it ' + e.message + '.\nCheck your connection and try again.'); return; }
   if (typeof docx === 'undefined') { alert('Word export library not loaded.'); return; }
+  // Plots go to Word as pictures: drawn to PNG first, since building the document cannot wait on an image
+  for (const ch of document.querySelectorAll('.calc-area .plot-chip')) { try { ch._png = await plotToPng(ch.querySelector('svg')); } catch (e) { ch._png = null; } }
   const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
           HeadingLevel, AlignmentType, BorderStyle, WidthType, ShadingType, ImageRun, LevelFormat } = docx;
   const numbering = { config: [
@@ -6807,6 +7049,7 @@ async function exportWord() {
       if(tag==='u')nf.underline={};if(tag==='s'||tag==='strike')nf.strike=true;
       // Export display values (converted units), not raw KaTeX text / SI internals.
       if(node.classList&&node.classList.contains('formula-chip')){const t=formulaChipExportText(node);if(t)runs.push(new TextRun({text:t,italics:true,...fmt}));return;}
+      if(node.classList&&node.classList.contains('plot-chip')){if(node._png)runs.push(new ImageRun({data:node._png.bytes,transformation:{width:node._png.w,height:node._png.h}}));else runs.push(new TextRun({text:node.dataset.plot||'',italics:true,...fmt}));return;}
       if(node.classList&&node.classList.contains('var-def-chip')){const t=varChipExportText(node);if(t)runs.push(new TextRun({text:t,italics:true,...fmt}));return;}
       // Images produced no runs at all, so every one was dropped from the export.
       if(tag==='img'||(node.classList&&node.classList.contains('calc-img-wrap'))){
@@ -6837,7 +7080,7 @@ async function exportWord() {
     if(node.nodeType!==Node.ELEMENT_NODE)return null;
     let tag=node.tagName.toLowerCase();
     // A chip or image at the editor root is its own paragraph.
-    if(node.classList&&(node.classList.contains('formula-chip')||node.classList.contains('var-def-chip')||node.classList.contains('calc-img-wrap'))){
+    if(node.classList&&(node.classList.contains('formula-chip')||node.classList.contains('var-def-chip')||node.classList.contains('calc-img-wrap')||node.classList.contains('plot-chip'))){
       const runs=getRuns(node); return runs.length?new Paragraph({children:runs}):null;
     }
     if(tag==='h1')return new Paragraph({heading:HeadingLevel.HEADING_1,children:getRuns(node)});
