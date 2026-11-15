@@ -181,6 +181,7 @@ body.has-project .fd-proj{opacity:1;pointer-events:auto}
 .proj-item.on{background:#fce6f1;border-left-color:var(--rubine)}
 .proj-num{font-size:9.5px;color:#bbb;min-width:13px;text-align:right;flex-shrink:0}
 .proj-name{flex:1;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:1px 0}
+.proj-shared{margin-left:6px;font-size:9.5px;font-weight:700;color:var(--rubine);border:1px solid currentColor;border-radius:3px;padding:0 3px}
 .proj-item.on .proj-name{font-weight:700;color:var(--rubine)}
 .proj-acts{display:flex;gap:1px;opacity:0;flex-shrink:0}
 .proj-item:hover .proj-acts,.proj-item.on .proj-acts{opacity:1}
@@ -3913,10 +3914,71 @@ function sectionSVG(p) {
   return `<svg class="plot-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" font-size="11" font-family="inherit" fill="currentColor" role="img" aria-label="${svgEsc(p.src)}">${g}</svg>`;
 }
 
+// ══ SHARED VALUES IN A PACK ══════════════════════════════════════
+// One check of a pack may hold its shared values (the materials, a section several checks use, …): its variables are
+// given to every other check before that check's own lines, so they are written once. A check that defines one of those
+// names itself uses its own. The values are worked out by drawing the shared check (cached until it changes: it is
+// redrawn when it is edited, opened, or made the shared check).
+let _sharedCache = null, _computingShared = false, _drawingId = null;
+function sharedCheck() { return inProject() ? project.checks.find(c => c.shared) || null : null; }
+function sharedSeed() {
+  if (_computingShared) return null;
+  const sc = sharedCheck(); if (!sc) return null;
+  return ((_drawingId || project.activeId) === sc.id) ? null : _sharedCache;
+}
+// after a rebuild of the shared check itself, its values are the shared values
+function noteSharedValues() {
+  if (_computingShared) return;
+  const sc = sharedCheck();
+  if (sc && (_drawingId || project.activeId) === sc.id) _sharedCache = { vars: { ...vars }, units: { ...varUnits } };
+}
+// work the shared values out by drawing the shared check; restore: put the document that was on screen back
+function computeShared(restore) {
+  _sharedCache = null;
+  const sc = sharedCheck(); if (!sc) return;
+  const cur = restore ? captureDoc() : null;
+  _computingShared = true; _packRendering = true;
+  try { applyDoc(sc.doc || blankDoc()); _sharedCache = { vars: { ...vars }, units: { ...varUnits } }; }
+  finally { _computingShared = false; _packRendering = false; }
+  if (restore) applyDoc(cur);
+}
+function toggleShared(id) {
+  if (!inProject()) return;
+  stashActiveCheck();
+  project.checks.forEach(c => { c.shared = c.id === id ? !c.shared : false; });
+  computeShared(true);
+  rebuildVars();
+  renderProjectPanel();
+  projectAutoSave();
+}
+// a check saved on its own carries the shared values it uses (and what they use in turn), ahead of its own lines
+function withSharedValues(c) {
+  const sc = sharedCheck();
+  if (!sc || sc.id === c.id || !sc.doc || !c.doc) return c.doc;
+  const ID = /[A-Za-z][A-Za-z0-9_]*/g, t = document.createElement('template'), own = new Set(), want = new Set();
+  const uses = el => String(el.dataset.varExpr || el.dataset.formula || el.dataset.plot || '').match(ID) || [];
+  for (const html of c.doc.pages || []) {
+    t.innerHTML = html;
+    t.content.querySelectorAll('.var-def-chip[data-var-name]').forEach(ch => own.add(ch.dataset.varName));
+    t.content.querySelectorAll('.var-def-chip, .formula-chip, .plot-chip').forEach(ch => uses(ch).forEach(n => want.add(n)));
+  }
+  // the shared definitions, by name, and those the check needs: what it uses and does not define, then what they use
+  const defs = new Map();
+  for (const html of sc.doc.pages || []) { t.innerHTML = html; t.content.querySelectorAll('.var-def-chip[data-var-name]').forEach(ch => defs.set(ch.dataset.varName, uses(ch))); }
+  const need = new Set(), stack = [...want].filter(n => !own.has(n) && defs.has(n));
+  while (stack.length) { const n = stack.pop(); if (need.has(n)) continue; need.add(n); defs.get(n).forEach(m => { if (!own.has(m) && defs.has(m) && !need.has(m)) stack.push(m); }); }
+  if (!need.size) return c.doc;
+  // the shared check's pages with only those definitions (its prose stays, so each value keeps its description)
+  const pages = (sc.doc.pages || []).map(html => { t.innerHTML = html; t.content.querySelectorAll('.var-def-chip[data-var-name]').forEach(ch => { if (!need.has(ch.dataset.varName)) ch.remove(); }); const d = document.createElement('div'); d.appendChild(t.content.cloneNode(true)); return d.innerHTML; });
+  return { ...c.doc, pages: [...pages, ...(c.doc.pages || [])] };
+}
+
 function rebuildVars(seed) {
   _rebuildActive = true;
-  vars = seed ? { ...seed.vars } : {};
-  varUnits = seed ? { ...seed.units } : {};
+  // In a pack with a check of shared values, the other checks start from its variables (see sharedSeed)
+  const shared = seed ? null : sharedSeed();
+  vars = seed ? { ...seed.vars } : shared ? { ...shared.vars } : {};
+  varUnits = seed ? { ...seed.units } : shared ? { ...shared.units } : {};
   // Definitions that could not be evaluated this pass, usually because they are
   // written above the terms they use.
   let unresolved = 0;
@@ -4058,6 +4120,7 @@ function rebuildVars(seed) {
   }
   _rebuildPromoted = false;
   drawBareChips();
+  noteSharedValues();
   renderPlots();
   renderSidebar();
   // Only the innermost pass of a retry chain reaches here, so this runs once
@@ -6293,7 +6356,7 @@ function projectData() {
     kind: 'calcpad-project', version: 1,
     name: project.name,
     activeId: project.activeId,
-    checks: project.checks.map(c => ({ id: c.id, name: c.name, doc: c.doc })),
+    checks: project.checks.map(c => ({ id: c.id, name: c.name, doc: c.doc, ...(c.shared ? { shared: true } : {}) })),
     savedAt: new Date().toISOString(),
   }, null, 2);
 }
@@ -6365,9 +6428,11 @@ function adoptLoadedProject(data, fileName) {
           id: c.id || newCheckId(),
           name: c.name || 'Untitled check',
           doc: c.doc || null,
+          shared: !!c.shared,
         })),
         activeId: null,
       };
+      _sharedCache = null;
       // The file's own name is the pack's identity from here on — it is what
       // the reader sees in the folder, and a stored name left over from a
       // "Save as" under a different one would print in every footer.
@@ -6514,7 +6579,7 @@ function checkSaveAs() {
   const c = activeCheck();
   if (!c) { fileSaveAs(); return; }
   stashActiveCheck();
-  const data = JSON.stringify({ ...c.doc, savedAt: new Date().toISOString() }, null, 2);
+  const data = JSON.stringify({ ...withSharedValues(c), savedAt: new Date().toISOString() }, null, 2);
   if (!canPickFiles()) {
     const name = prompt('Save this check as:', c.name);
     if (name === null) return;
@@ -6535,6 +6600,8 @@ function openCheck(id) {
   const c = project.checks.find(x => x.id === id);
   if (!c) return;
   project.activeId = id;
+  const sc = sharedCheck();
+  if (sc && sc.id !== id && !_sharedCache) computeShared(false);
   applyDoc(c.doc || blankDoc());
   if (!c.doc) c.doc = captureDoc();
   setProjectTitle();
@@ -6561,6 +6628,7 @@ function removeCheck(id) {
   if (!confirm('Remove "' + c.name + '" from the project?\n\nIt is deleted from the pack. If you want to keep it, cancel and use “Save this check as…” first.')) return;
   const wasActive = project.activeId === id;
   project.checks.splice(i, 1);
+  if (c.shared) _sharedCache = null;   // its values go with it
   if (!project.checks.length) { addCheck('Check 1', blankDoc(), true); return; }
   if (wasActive) {
     // The active check is gone, so nothing on screen belongs to the pack any
@@ -6609,6 +6677,7 @@ function renderProjectPanel() {
     const nm = document.createElement('span');
     nm.className = 'proj-name';
     nm.textContent = c.name;
+    if (c.shared) { const tag = document.createElement('span'); tag.className = 'proj-shared'; tag.textContent = 'shared'; tag.title = 'Its values are given to every other check'; nm.appendChild(tag); }
     nm.onclick = () => openCheck(c.id);
     row.appendChild(nm);
 
@@ -6625,6 +6694,7 @@ function renderProjectPanel() {
     };
     acts.appendChild(btn('↑', 'Move up',   () => moveCheck(c.id, -1), i === 0));
     acts.appendChild(btn('↓', 'Move down', () => moveCheck(c.id,  1), i === project.checks.length - 1));
+    acts.appendChild(btn('★', c.shared ? 'Stop sharing its values' : 'Share its values with every other check', () => toggleShared(c.id)));
     acts.appendChild(btn('✎', 'Rename',    () => renameCheck(c.id)));
     acts.appendChild(btn('✕', 'Remove from project', () => removeCheck(c.id)));
     row.appendChild(acts);
@@ -6646,9 +6716,10 @@ function renderProjectPanel() {
 let _packRendering = false;
 function drawnChecks() {
   const act = activeCheck(), out = [];
+  if (sharedCheck() && !_sharedCache) computeShared(false);
   _packRendering = true;
-  try { project.checks.forEach(c => { applyDoc(c.doc || blankDoc()); out.push(getAllEditors().map(ed => ed.innerHTML.replace(/ data-tbl-handlers="1"/g, ''))); }); }
-  finally { _packRendering = false; applyDoc((act && act.doc) || blankDoc()); }
+  try { project.checks.forEach(c => { _drawingId = c.id; applyDoc(c.doc || blankDoc()); out.push(getAllEditors().map(ed => ed.innerHTML.replace(/ data-tbl-handlers="1"/g, ''))); }); }
+  finally { _packRendering = false; _drawingId = null; applyDoc((act && act.doc) || blankDoc()); }
   return out;
 }
 function buildPackPrint(drawn) {
@@ -7187,9 +7258,10 @@ function loadProjectFromLocalStorage() {
       return false;
     project = {
       name: data.name || 'Untitled project',
-      checks: data.checks.map(c => ({ id: c.id || newCheckId(), name: c.name || 'Untitled check', doc: c.doc || null })),
+      checks: data.checks.map(c => ({ id: c.id || newCheckId(), name: c.name || 'Untitled check', doc: c.doc || null, shared: !!c.shared })),
       activeId: null,
     };
+    _sharedCache = null;
     projectFileName = project.name;
     openCheck(data.activeId && project.checks.some(c => c.id === data.activeId)
       ? data.activeId : project.checks[0].id);
