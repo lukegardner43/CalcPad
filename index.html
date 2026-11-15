@@ -3579,6 +3579,7 @@ let _autoSaveTimer = null;
 // a couple of photos will do it — autosave stopped for good with no sign of it.
 let _saveWarned = false;
 function autoSave() {
+  if (_packRendering) return;   // the pack is being drawn check by check for printing (drawnChecks)
   clearTimeout(_autoSaveTimer);
   _autoSaveTimer = setTimeout(() => {
     // In a pack it is the pack that has to survive a reload, not just whichever
@@ -4056,6 +4057,7 @@ function rebuildVars(seed) {
     return;
   }
   _rebuildPromoted = false;
+  drawBareChips();
   renderPlots();
   renderSidebar();
   // Only the innermost pass of a retry chain reaches here, so this runs once
@@ -5869,10 +5871,32 @@ function captureDoc() {
     // saved could never rejoin — it came back as two tables, the second with no
     // header, permanently. The repeated header stays with it for the same
     // reason; addRepeatedHeader() will not add a second one.
-    pages: getAllEditors().map(ed => ed.innerHTML
-      .replace(/ data-tbl-handlers="1"/g, '')),
+    pages: getAllEditors().map(bareHtml),
     preferredUnits: { ...preferredUnits },
   };
+}
+
+// A saved page keeps each chip's definition (its data-* attributes) and its line as plain text, not the maths drawn for
+// it, and a plot keeps its line, not its drawing: rebuildVars() draws them all again from their definitions whenever
+// the page is opened. The drawn maths came to about 3 kB a formula, so a long check, or a pack once its checks had
+// been opened, outgrew the browser's storage and autosave stopped. (Chips inside tables are left as they are.)
+function bareHtml(ed) {
+  const c = ed.cloneNode(true);
+  c.querySelectorAll('.var-def-chip, .formula-chip').forEach(ch => {
+    if (ch.closest('.calc-table')) return;
+    const t = chipEditText(ch);
+    if (t == null) return;
+    ch.textContent = t;
+    ch.dataset.bare = '1';
+  });
+  c.querySelectorAll('.plot-chip').forEach(ch => { ch.textContent = ch.dataset.plot || ''; });
+  return c.innerHTML.replace(/ data-tbl-handlers="1"/g, '');
+}
+// After a rebuild: draw the chips that came in as definitions only (rebuildVars draws formulas and expressions as it
+// goes, but not plain values, nor a definition that could not be evaluated)
+function drawBareChips() {
+  document.querySelectorAll('.calc-area .var-def-chip[data-bare]').forEach(ch => { try { renderVarChipContent(ch); } catch (e) { /* keeps its line */ } ch.removeAttribute('data-bare'); });
+  document.querySelectorAll('.calc-area .formula-chip[data-bare]').forEach(ch => ch.removeAttribute('data-bare'));
 }
 
 // Put a captured document back on screen. Used by File ▸ Open, by switching
@@ -6617,7 +6641,17 @@ function renderProjectPanel() {
 // them: the document on screen is never touched, so there is nothing to restore
 // if printing is cancelled, and a check that is not open still prints from what
 // the pack stored for it.
-function buildPackPrint() {
+// Every check of the pack as drawn: each is opened in turn (a saved check holds definitions, not drawn maths), its
+// pages taken, and the check that was on screen put back. Autosave waits until then, so nothing is saved half-way.
+let _packRendering = false;
+function drawnChecks() {
+  const act = activeCheck(), out = [];
+  _packRendering = true;
+  try { project.checks.forEach(c => { applyDoc(c.doc || blankDoc()); out.push(getAllEditors().map(ed => ed.innerHTML.replace(/ data-tbl-handlers="1"/g, ''))); }); }
+  finally { _packRendering = false; applyDoc((act && act.doc) || blankDoc()); }
+  return out;
+}
+function buildPackPrint(drawn) {
   const root = document.createElement('div');
   root.className = 'pack-print';
 
@@ -6630,9 +6664,9 @@ function buildPackPrint() {
   // Work out where each check starts before drawing anything, so the contents
   // page can carry real sheet numbers.
   let sheet = 1;
-  const starts = project.checks.map(c => {
+  const starts = project.checks.map((c, i) => {
     const at = sheet;
-    sheet += Math.max(1, ((c.doc && c.doc.pages) || ['']).length);
+    sheet += Math.max(1, ((drawn && drawn[i]) || (c.doc && c.doc.pages) || ['']).length);
     return at;
   });
 
@@ -6676,7 +6710,7 @@ function buildPackPrint() {
   // ── Every check, in order, numbered continuously ──
   project.checks.forEach((c, ci) => {
     const doc = c.doc || { meta: {}, pages: [''] };
-    const pages = (doc.pages && doc.pages.length) ? doc.pages : [''];
+    const pages = (drawn && drawn[ci] && drawn[ci].length) ? drawn[ci] : (doc.pages && doc.pages.length) ? doc.pages : [''];
     pages.forEach((html, pi) => {
       const wrap = document.createElement('div');
       wrap.className = 'page-wrap';
@@ -6716,7 +6750,7 @@ function printPack() {
   stashActiveCheck();
   if (!project.checks.length) return;
   clearPackPrint();
-  _packPrintNode = buildPackPrint();
+  _packPrintNode = buildPackPrint(drawnChecks());
   document.body.appendChild(_packPrintNode);
   document.body.classList.add('printing-pack');
   const go = () => { window.print(); };
