@@ -370,7 +370,7 @@ body.has-project{padding-left:230px}
    default is 1.21em, which made variable chips jump in size next to formula
    chips and whenever one became the other. */
 .formula-chip .katex,.var-def-chip .katex{font-size:1em}
-/* PLOT(...) and SECTION(...) lines: a drawing redrawn from the values on every rebuild; click to edit */
+/* PLOT(...), SECTION(...) and PUNCH(...) lines: a drawing redrawn from the values on every rebuild; click to edit */
 .plot-chip{display:inline-block;max-width:100%;vertical-align:top;margin:4px 0;cursor:pointer;color:var(--ink,#222)}
 .plot-chip svg{max-width:100%;height:auto;display:block}
 .plot-chip .plot-err{color:var(--rubine);font-style:italic}
@@ -944,6 +944,15 @@ body.has-project{padding-left:230px}
           <code>x: x_u</code> (the neutral axis, with the strain
           and the stress block) and <code>hog: 1</code>
           (compression at the bottom).</div>
+        <div class="sref-i"><span>PUNCH(c_1, c_2, d)</span></div>
+        <div class="sref-d">A column in plan with its punching
+          control perimeters: c_1 × c_2 (in y and x), u₁ at 2d.
+          Add any of <code>circ: 1</code> (diameter c_1),
+          <code>edge: a_y</code> and <code>corner: a_x</code>
+          (slab edges that far from the face),
+          <code>out: r_out</code> (u_out,ef) and
+          <code>links: n</code> with <code>s0:</code> and
+          <code>sr:</code> (perimeters of links).</div>
         <div class="sref-d">Click a plot to edit its line.</div>
       </div>
       <div class="sref">
@@ -3716,10 +3725,11 @@ function getAllEditors() {
 // A line of its own
 //   PLOT(expr, x, from, to) [unit]           draws expr against x from "from" to "to" (several curves: expr1; expr2)
 //   SECTION(b, h, c, n, phi, key: value, …)  draws a concrete section with its bars (keys below)
+//   PUNCH(c1, c2, d, key: value, …)          draws a column's punching perimeters in plan (keys below)
 // becomes a chip that keeps its own text (data-plot) and is redrawn from the current values at the end of every
 // rebuild, so it follows any change above it, prints and saves with the document. Click it to edit the line.
 // Values are SI inside, like every variable; [unit] (or [#unit]) sets the unit of the plotted values.
-const PLOT_RE = /^\s*(PLOT|SECTION)\s*\(([\s\S]*)\)\s*(?:\[([^\]]*)\])?\s*$/i;
+const PLOT_RE = /^\s*(PLOT|SECTION|PUNCH)\s*\(([\s\S]*)\)\s*(?:\[([^\]]*)\])?\s*$/i;
 const PLOT_COLOURS = ['#1d5fbf', '#c4242a', '#247b50', '#a15c07'];
 let _plotClipId = 0;
 function parsePlotLine(text) {
@@ -3819,8 +3829,8 @@ const svgEsc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt
 function renderPlotChip(chip) {
   const p = parsePlotLine(chip.dataset.plot || '');
   try {
-    if (!p) throw new Error('write PLOT(expr, x, from, to) or SECTION(b, h, c, n, phi)');
-    chip.innerHTML = p.kind === 'PLOT' ? plotSVG(p) : sectionSVG(p);
+    if (!p) throw new Error('write PLOT(expr, x, from, to), SECTION(b, h, c, n, phi) or PUNCH(c1, c2, d)');
+    chip.innerHTML = p.kind === 'PLOT' ? plotSVG(p) : p.kind === 'PUNCH' ? punchSVG(p) : sectionSVG(p);
     chip.classList.remove('error'); chip.title = 'Click to edit: ' + p.src;
   } catch (e) {
     chip.classList.add('error');
@@ -3863,12 +3873,17 @@ function plotSVG(p) {
 //   top, phitop: the top bars (phitop defaults to phi); bw, hf: a flanged section (b the flange, bw the web);
 //   x: the neutral axis depth, from the compression face (the top; the bottom when hog: 1), drawn with the strain
 //   and the stress block (ε_cu2 = 3.5‰, 0.8x).
-function sectionSVG(p) {
+// the arguments of a drawing line: the values in order, then key: value
+function plotArgs(p) {
   const pos = [], opt = {};
   for (const arg of splitTop(p.args, ',;')) {
-    const m = /^([A-Za-z]+)\s*:\s*([\s\S]+)$/.exec(arg);
+    const m = /^([A-Za-z0-9]+)\s*:\s*([\s\S]+)$/.exec(arg);
     if (m) opt[m[1].toLowerCase()] = m[2]; else if (arg) pos.push(arg);
   }
+  return { pos, opt };
+}
+function sectionSVG(p) {
+  const { pos, opt } = plotArgs(p);
   if (pos.length !== 5) throw new Error('give b, h, c, n and phi: SECTION(b, h, c, n, phi), then any of link:, top:, phitop:, bw:, hf:, x:, hog:');
   const mm = e => plotEval(e, vars) * 1000, cnt = e => Math.round(plotEval(e, vars));
   const b = mm(pos[0]), h = mm(pos[1]), c = mm(pos[2]), n = cnt(pos[3]), phi = mm(pos[4]);
@@ -3911,6 +3926,68 @@ function sectionSVG(p) {
     W = Math.max(bx + 24, sx + Math.min(es, 12) * k + 70);
   }
   const H = Y(h) + (flanged ? 40 : 28);
+  return `<svg class="plot-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" font-size="11" font-family="inherit" fill="currentColor" role="img" aria-label="${svgEsc(p.src)}">${g}</svg>`;
+}
+
+// PUNCH(c1, c2, d, circ: 1, edge: a_y, corner: a_x, out: r_out, links: n, s0: s_0, sr: s_r)
+//   a column and its punching control perimeters in plan (BS EN 1992-1-1 6.4.2): c1, c2 the column's dimensions in y
+//   and in x (circ: 1, a circular column of diameter c1); d the effective depth, the basic control perimeter u_1 at 2d;
+//   edge: a slab edge along x, a_y from the column face (an edge column), and corner: a second edge along y, a_x from the
+//   face (a corner column); near an edge each perimeter is the shorter of Figures 6.13 and 6.15 (6.4.2(4)); out: the
+//   perimeter u_out,ef at r_out from the face; links: n perimeters of shear links, the first s0 from the face (default
+//   0.5d), then every sr (default 0.75d).
+function punchSVG(p) {
+  const { pos, opt } = plotArgs(p);
+  if (pos.length !== 3) throw new Error('give c1, c2 and d: PUNCH(c1, c2, d), then any of circ:, edge:, corner:, out:, links:, s0:, sr:');
+  if (opt.corner != null && opt.edge == null) throw new Error('a corner column needs edge: as well as corner:');
+  const mm = e => plotEval(e, vars) * 1000, circ = opt.circ ? plotEval(opt.circ, vars) > 0 : false;
+  const c1 = mm(pos[0]), c2 = circ ? c1 : mm(pos[1]), d = mm(pos[2]), PI = Math.PI;
+  const G = { type: opt.corner != null ? 'corner' : opt.edge != null ? 'edge' : 'internal', circ, ax: c2 / 2, ay: c1 / 2, ey: opt.edge != null ? Math.max(0, mm(opt.edge)) : 0, ex: opt.corner != null ? Math.max(0, mm(opt.corner)) : 0 };
+  if (!(c1 > 0 && c2 > 0 && d > 0)) throw new Error('c1, c2 and d must be positive');
+  const rOut = opt.out != null ? Math.max(0, mm(opt.out)) : null, nL = opt.links != null ? Math.round(plotEval(opt.links, vars)) : 0;
+  const s0 = opt.s0 != null ? mm(opt.s0) : 0.5 * d, sr = opt.sr != null ? mm(opt.sr) : 0.75 * d;
+  if (!(nL >= 0 && nL <= 200)) throw new Error('links: give the number of perimeters (at most 200)');
+  if (nL && !(s0 >= 0 && sr > 0)) throw new Error('s0 and sr must be positive');
+  const rL = Array.from({ length: nL }, (_, i) => s0 + i * sr), rMax = Math.max(2 * d, rOut || 0, ...rL) + 0.35 * d;
+  // the extent, the slab stopping at its edges
+  const yE = -(G.ay + G.ey), xE = -(G.ax + G.ex), x0 = G.type === 'corner' ? xE - 0.12 * d : -(G.ax + rMax), y0 = G.type !== 'internal' ? yE - 0.12 * d : -(G.ay + rMax), x1 = G.ax + rMax, y1 = G.ay + rMax;
+  const s = Math.min(420 / (x1 - x0), 380 / (y1 - y0)), ox = 16, oy = 14, X = v => ox + (v - x0) * s, Y = v => oy + (y1 - v) * s, seg = 2 / s;
+  // a perimeter at r from the face (as RC Punching Shear draws it)
+  const length = (g, r) => { const { type, ax, ay } = g, full = g.circ ? 2 * PI * (ax + r) : 4 * (ax + ay) + 2 * PI * r;
+    if (type === 'internal') return full;
+    return type === 'edge' ? (g.circ ? PI * (ax + r) + 2 * (ax + g.ey) : 2 * ax + 2 * (2 * ay + g.ey) + PI * r) : (g.circ ? PI * (ax + r) / 2 + 2 * ax + g.ex + g.ey : 2 * ax + g.ex + 2 * ay + g.ey + PI * r / 2); };
+  const path = r => {
+    const g = G.type !== 'internal' && length({ ...G, type: 'internal' }, r) <= length(G, r) + 1e-9 ? { ...G, type: 'internal' } : G, { type, ax, ay } = g, pts = [];
+    const arc = (cx, cy, R, a0, a1) => { const n = Math.max(2, Math.ceil(Math.abs(a1 - a0) * R / seg)); for (let k = 0; k <= n; k++) { const a = a0 + (a1 - a0) * k / n; pts.push([cx + R * Math.cos(a), cy + R * Math.sin(a)]); } };
+    const line = (xa, ya, xb, yb) => { pts.push([xa, ya], [xb, yb]); };
+    if (type === 'internal') {
+      if (g.circ) arc(0, 0, ax + r, 0, 2 * PI);
+      else { line(ax + r, -ay, ax + r, ay); arc(ax, ay, r, 0, PI / 2); line(ax, ay + r, -ax, ay + r); arc(-ax, ay, r, PI / 2, PI); line(-ax - r, ay, -ax - r, -ay); arc(-ax, -ay, r, PI, 1.5 * PI); line(-ax, -ay - r, ax, -ay - r); arc(ax, -ay, r, 1.5 * PI, 2 * PI); }
+    } else if (type === 'edge') {
+      if (g.circ) { line(-ax - r, yE, -ax - r, 0); arc(0, 0, ax + r, PI, 0); line(ax + r, 0, ax + r, yE); }
+      else { line(-ax - r, yE, -ax - r, ay); arc(-ax, ay, r, PI, PI / 2); line(-ax, ay + r, ax, ay + r); arc(ax, ay, r, PI / 2, 0); line(ax + r, ay, ax + r, yE); }
+    } else if (g.circ) { line(xE, ax + r, 0, ax + r); arc(0, 0, ax + r, PI / 2, 0); line(ax + r, 0, ax + r, yE); }
+    else { line(xE, ay + r, ax, ay + r); arc(ax, ay, r, PI / 2, 0); line(ax + r, ay, ax + r, yE); }
+    return pts.map(q => X(q[0]).toFixed(1) + ',' + Y(q[1]).toFixed(1)).join(' ');
+  };
+  const sx0 = G.type === 'corner' ? xE : x0, sy0 = G.type !== 'internal' ? yE : y0, clip = 'plotclip' + (++_plotClipId);
+  let g = `<defs><clipPath id="${clip}"><rect x="${X(sx0)}" y="${Y(y1)}" width="${(x1 - sx0) * s}" height="${(y1 - sy0) * s}"/></clipPath></defs>`;
+  g += `<rect x="${X(sx0)}" y="${Y(y1)}" width="${(x1 - sx0) * s}" height="${(y1 - sy0) * s}" fill="#eef0f3"/>`;
+  if (G.type !== 'internal') g += `<line x1="${X(sx0)}" x2="${X(x1)}" y1="${Y(yE)}" y2="${Y(yE)}" stroke="#333" stroke-width="2.5"/>`;
+  if (G.type === 'corner') g += `<line x1="${X(xE)}" x2="${X(xE)}" y1="${Y(yE)}" y2="${Y(y1)}" stroke="#333" stroke-width="2.5"/>`;
+  g += `<g clip-path="url(#${clip})" fill="none">`;
+  rL.forEach(r => { g += `<polyline points="${path(r)}" stroke="#247b50" stroke-width="1"/>`; });
+  if (rOut != null && rOut > 0) g += `<polyline points="${path(rOut)}" stroke="#c4242a" stroke-width="1.5" stroke-dasharray="6 4"/>`;
+  g += `<polyline points="${path(2 * d)}" stroke="#1d5fbf" stroke-width="2"/></g>`;
+  g += circ ? `<circle cx="${X(0)}" cy="${Y(0)}" r="${G.ax * s}" fill="#8a9099" stroke="#333"/>` : `<rect x="${X(-G.ax)}" y="${Y(G.ay)}" width="${2 * G.ax * s}" height="${2 * G.ay * s}" fill="#8a9099" stroke="#333"/>`;
+  // the key, and the sizes
+  const f0 = v => fmtNumDisplay(Math.round(v)), H0 = Y(sy0) + 10, key = [['#1d5fbf', '', `u₁ at 2d = ${f0(2 * d)}`]];
+  if (rOut != null && rOut > 0) key.push(['#c4242a', '6 4', `u_out,ef at ${f0(rOut)}`]);
+  if (nL) key.push(['#247b50', '', `${nL} perimeter${nL > 1 ? 's' : ''} of links, ${f0(s0)} + ${f0(sr)} …`]);
+  key.forEach(([c, da, t], k) => { const yy = H0 + 8 + 16 * k; g += `<line x1="${ox}" x2="${ox + 22}" y1="${yy}" y2="${yy}" stroke="${c}" stroke-width="2"${da ? ` stroke-dasharray="${da}"` : ''}/><text x="${ox + 28}" y="${yy + 4}">${svgEsc(t)}</text>`; });
+  const lab = `${circ ? `D = ${f0(c1)}` : `c₁ = ${f0(c1)} (y), c₂ = ${f0(c2)} (x)`}, d = ${f0(d)}${G.type !== 'internal' ? `; edge ${f0(G.ey)}${G.type === 'corner' ? `, ${f0(G.ex)}` : ''} from the face` : ''}`;
+  const H = H0 + 16 * key.length + 22, W = Math.max(X(x1) + 16, 300);
+  g += `<text x="${ox}" y="${H - 6}">${svgEsc(lab)}</text>`;
   return `<svg class="plot-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" font-size="11" font-family="inherit" fill="currentColor" role="img" aria-label="${svgEsc(p.src)}">${g}</svg>`;
 }
 
