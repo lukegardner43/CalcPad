@@ -3844,10 +3844,14 @@ function rebuildVars(seed) {
 // number, unconverted. The parser refuses those now, but only for new input, so
 // opening an old file has to find them and say so rather than keep them quietly.
 // Run from rebuildVars(), so correcting a flagged line clears its own warning.
+// A display unit may be forced ("[#MPa]", or "[#]" for a plain number; see
+// displayUnitSpec): the unit after the # is what is tested, and "[#]" has none.
+// Testing the whole spec listed every forced result as "not a unit".
 function flagUnparseableUnits() {
   const bad = [];
   document.querySelectorAll('.var-def-chip').forEach(chip => {
-    const offender = [chip.dataset.varUnit, chip.dataset.varDisplayUnit]
+    const disp = chip.dataset.varDisplayUnit && displayUnitSpec(chip.dataset.varDisplayUnit).unit;
+    const offender = [chip.dataset.varUnit, disp]
       .find(u => u && !UNIT_TOKEN_RE.test(u));
     if (!offender) { chip.classList.remove('bad-unit'); chip.removeAttribute('data-bad-unit'); return; }
     chip.classList.add('bad-unit');
@@ -4719,8 +4723,14 @@ function pasteLineToFragment(rawLine, wvars, wunits) {
     } else try {
       val = parseFloat(evalFormula(exprStr, wvars, varName).replace(/,/g, ''));
       if (isNaN(val)) throw new Error('NaN');
-      const inferred = evalUnitExpr(exprStr, wunits);
-      if (inferred && Object.keys(inferred).length) { siUnit = unit = unitObjToStr(inferred); }
+      // No unit on the chip, as parseVarDefinition() and the Enter key: the
+      // rebuildVars() that follows every paste works an expression's unit out
+      // from its operands and its [unit] or [#unit]. A snapshot taken here was
+      // worse than none. It was worked out before a forced result above it had
+      // its unit, so "A_swsmin = ... [#mm2/mm]" counted as a plain number and
+      // "u = A_swsmin/A_sws [#]" was stored as being in /m; rebuildVars() then
+      // took that stored unit over the [#], and the chip was outlined as "not
+      // a unit".
       ok = true;
     } catch(err) {
       const ue = extractValueAndUnit(exprStr);
