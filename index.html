@@ -3480,7 +3480,7 @@ function _reflow(edEl, contEl) {
   const maxH = contEl.clientHeight;
   if (edEl.scrollHeight <= maxH) {
     edEl.style.overflow = prevOverflow;
-    pullBackFromNext(edEl, contEl); // absorb content from the next page if there is room
+    if (!_reflowBatch) pullBackFromNext(edEl, contEl); // absorb content from the next page if there is room
     return;
   }
 
@@ -3565,10 +3565,116 @@ function _reflow(edEl, contEl) {
   // it for 200ms, which is exactly the window these mutations land in. This
   // terminates because the check at the top returns as soon as the page fits,
   // and the paths that move nothing return before reaching here.
+  if (_reflowBatch) return; // reflowAllPages() goes on to the next page itself, and rebuilds once at the end
   scheduleReflow(edEl, contEl);
   scheduleReflow(nextEdEl, nextContEl);
   rebuildVars();
 }
+
+// Split every page that holds more than fits, first page to last, there and then.
+// Opening a document puts each saved page back into a page as it was saved, and
+// nothing else splits one that is too full: the overflow monitor answers typing,
+// and rebuildVars() mutes it while the opened document's chips are drawn. A page
+// written elsewhere comes in far too full: a calculation from EngineeringTools is
+// one long page, so it opened as page 1 with everything after it cut off. This
+// only splits; it never pulls content back, so a page someone ended early stays so.
+let _reflowBatch = false;
+function reflowAllPages() {
+  if (formulaBuffer !== null || _editingVarDef) return false;
+  const c0 = document.getElementById('content0');
+  if (!c0 || !c0.style.height) return false; // the page heights are not set yet (start-up sets them, then calls this)
+  let any = false;
+  // A split moves nodes but changes nothing in them or their order, so the values
+  // stand and nothing is rebuilt (rebuilding a long calculation takes a second or
+  // more). Go round again until a pass moves nothing.
+  for (let round = 0; round < 6; round++) {
+    let moved = false;
+    _reflowBatch = true;
+    try {
+      for (let i = 0; i < 2000; i++) {
+        const ed = document.getElementById(i === 0 ? 'editor' : 'editor' + i);
+        if (!ed) break;
+        const cont = ed.closest('.pg-content');
+        // one pass moves everything below the split; a node split part-way may need another
+        for (let k = 0; k < 20 && ed.scrollHeight > cont.clientHeight; k++) {
+          const n = ed.childNodes.length, h = ed.scrollHeight;
+          // the last page holding several pages' worth: deal it out at once
+          if (k === 0 && h > 2 * cont.clientHeight && !document.getElementById('editor' + (i + 1)) && dealOutLongPage(ed, cont)) { moved = true; continue; }
+          reflow(ed, cont);
+          if (ed.childNodes.length === n && ed.scrollHeight >= h) break; // nothing could move (one node taller than a page)
+          moved = true;
+        }
+      }
+    } finally { _reflowBatch = false; }
+    if (!moved) break;
+    any = true;
+  }
+  return any;
+}
+// Some heights are known only later: a picture's once it is decoded, and the maths
+// once its fonts have loaded (the first document opened after start-up is laid
+// out in the fallback font). Split again at each.
+// A last page holding several pages' worth (a calculation from EngineeringTools
+// comes as one long page): deal its nodes out to new pages after it in one go, at
+// the breaks reflow() would find, measured where they lie, so each node moves
+// once. Splitting page by page moved everything below each break again and again,
+// and took seconds for a long calculation. The breaks found here can be a few
+// pixels out (a page's first line starts at the top of the line, not of the node),
+// which the page-by-page split then puts right with a line or two.
+function dealOutLongPage(edEl, contEl) { return withReflowGuard(() => _dealOutLongPage(edEl, contEl)); }
+function _dealOutLongPage(edEl, contEl) {
+  if (formulaBuffer !== null || _editingVarDef || _editCommitPending) return false;
+  const cs = getComputedStyle(edEl);
+  const padTop = parseFloat(cs.paddingTop) || 0, padBottom = parseFloat(cs.paddingBottom) || 0;
+  const prevOverflow = edEl.style.overflow;
+  edEl.style.overflow = 'visible';
+  const edTop = edEl.getBoundingClientRect().top;
+  const nextH = getPage2ContentHeight() - padBottom;   // the pages after page 1 are all alike
+  let limit = contEl.clientHeight - padBottom;         // the bottom of the page being filled, in this page's terms
+  const groups = [];
+  let cur = null;   // the nodes of the new page being filled (null: still this page)
+  let shown = 0;    // how many nodes with a height the page being filled has so far
+  for (let n = edEl.firstChild; n; ) {
+    const e = nodeEdges(n, edTop);
+    if (!e || e.bottom <= limit) { if (cur) cur.push(n); if (e) shown++; n = n.nextSibling; continue; }
+    // n crosses the bottom: split it at the line that does, as reflow() does, or move it whole
+    let start = n;
+    if (e.top < limit - 2) {
+      const tail = splitNodeAtHeight(n, limit, edTop);
+      if (tail && tail !== n) { if (!tail.parentNode) n.after(tail); if (cur) cur.push(n); shown++; start = tail; }
+    }
+    // the first thing on a page, taller than the page and unsplittable: it stays (reflow() leaves it too)
+    if (start === n && shown === 0) { if (cur) cur.push(n); shown++; n = n.nextSibling; continue; }
+    cur = []; groups.push(cur); shown = 0;
+    limit = (nodeEdges(start, edTop) || e).top - padTop + nextH;
+    n = start;
+  }
+  edEl.style.overflow = prevOverflow;
+  if (!groups.length) return false;
+  for (const g of groups) {
+    if (!g.length) continue;
+    const ed = addPage(), frag = document.createDocumentFragment();
+    for (const node of g) frag.appendChild(node);
+    ed.appendChild(frag);
+  }
+  return true;
+}
+
+let _pictureReflow = null;
+function reflowWhenPicturesLoad() {
+  const imgs = getAllEditors().flatMap(ed => Array.from(ed.querySelectorAll('img'))).filter(im => !im.complete);
+  const waits = imgs.map(im => (im.decode ? im.decode() : Promise.resolve()).catch(() => {}));
+  if (document.fonts && document.fonts.status !== 'loaded') waits.push(document.fonts.ready.catch(() => {}));
+  if (waits.length) Promise.all(waits).then(() => reflowAllPages());
+  // the drawing of chips and plots that rebuildVars() leaves to a timer
+  setTimeout(() => reflowAllPages(), 400);
+}
+// and whenever a picture on a page finishes loading (load does not bubble, so listen on the way down)
+document.addEventListener('load', e => {
+  if (!(e.target instanceof HTMLImageElement) || !e.target.closest('.calc-area')) return;
+  clearTimeout(_pictureReflow);
+  _pictureReflow = setTimeout(() => reflowAllPages(), 60);
+}, true);
 
 // ── Init ──────────────────────────────────────────────────────
 document.getElementById('m-date').value = new Date().toLocaleDateString('en-GB');
@@ -3583,6 +3689,9 @@ requestAnimationFrame(() => {
       document.getElementById('editor'),
       document.getElementById('content0')
     );
+    // what start-up restored (the autosave, a pack) was put on the pages before they had their heights
+    reflowAllPages();
+    reflowWhenPicturesLoad();
   });
 });
 
@@ -6059,6 +6168,8 @@ function applyDoc(doc) {
   reattachImageHandlers();
   rebuildVars();
   refreshAllTables();
+  reflowAllPages();
+  reflowWhenPicturesLoad();
 }
 
 function buildSaveData() {
