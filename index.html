@@ -969,7 +969,8 @@ body.has-project{padding-left:230px}
           <code>psi:</code> (Class 4: the ineffective parts),
           <code>sc: e</code> (the shear centre) and
           <code>warp: σ_w</code>. In a PLOT,
-          <code>mark: x_m</code> marks a point on the curve.</div>
+          <code>mark: x_m</code> marks a point on the curve and
+          <code>names: a; b</code> names the curves in the key.</div>
         <div class="sref-d">Click a plot to edit its line.</div>
       </div>
       <div class="sref">
@@ -3969,8 +3970,8 @@ function renderPlotChip(chip) {
     chip.title = 'Click to edit: ' + (chip.dataset.plot || '');
   }
 }
-// PLOT(expr, x, from, to, mark: x_m): mark: a value of x marked on the curve with its value (one for every curve, or one
-// per curve separated by ;)
+// PLOT(expr, x, from, to, mark: x_m, names: a; b): mark: a value of x marked on the curve with its value (one for every
+// curve, or one per curve separated by ;); names: the curves' names in the key, in place of their expressions
 function plotSVG(p) {
   const all = splitTop(p.args, ','), keyed = {}, a = [];
   for (const s of all) { const m = /^([A-Za-z][A-Za-z0-9]*)\s*:\s*([\s\S]+)$/.exec(s); if (m && a.length >= 4) keyed[m[1].toLowerCase()] = m[2]; else a.push(s); }
@@ -4007,7 +4008,8 @@ function plotSVG(p) {
       g += `<text x="${X(xv) + 7}" y="${Y(ym) + 14 + 12 * k}" fill="${PLOT_COLOURS[k]}">${svgEsc(me)} = ${svgEsc(plotFmt(xv))}: ${svgEsc(plotFmt(ym) + (yu.label ? ' ' + yu.label : ''))}</text>`;
     });
   }
-  if (curves.length > 1) curves.forEach((ex, k) => { g += `<line x1="${L}" x2="${L + 18}" y1="${10 + 16 * k}" y2="${10 + 16 * k}" stroke="${PLOT_COLOURS[k]}" stroke-width="2.5"/><text x="${L + 24}" y="${14 + 16 * k}">${svgEsc(ex)}</text>`; });
+  const cnames = keyed.names ? splitTop(keyed.names, ';') : null;
+  if (curves.length > 1) curves.forEach((ex, k) => { g += `<line x1="${L}" x2="${L + 18}" y1="${10 + 16 * k}" y2="${10 + 16 * k}" stroke="${PLOT_COLOURS[k]}" stroke-width="2.5"/><text x="${L + 24}" y="${14 + 16 * k}">${svgEsc(cnames && cnames[k] ? cnames[k] : ex)}</text>`; });
   g += `<text x="${(L + W - R) / 2}" y="${H - 6}" text-anchor="middle">${svgEsc(xn)}${xu.label ? ' [' + svgEsc(xu.label) + ']' : ''}</text>`;
   if (yu.label) g += `<text x="12" y="${(T + H - B) / 2}" text-anchor="middle" transform="rotate(-90 12 ${(T + H - B) / 2})">[${svgEsc(yu.label)}]</text>`;
   return `<svg class="plot-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" font-size="11" font-family="inherit" fill="currentColor" role="img" aria-label="${svgEsc(p.src)}">${g}</svg>`;
