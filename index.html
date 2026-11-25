@@ -4005,7 +4005,8 @@ function plotSVG(p) {
       const xm = plotEval(me, vars), ym = plotEval(ex, { ...vars, [xn]: xm }) / yu.f, xv = xm / xu.f;
       if (!(xv >= xt[0] && xv <= xt[xt.length - 1])) return;
       g += `<line x1="${X(xv)}" x2="${X(xv)}" y1="${Y(ym)}" y2="${H - B}" stroke="${PLOT_COLOURS[k]}" stroke-dasharray="3 3"/><rect x="${X(xv) - 4}" y="${Y(ym) - 4}" width="8" height="8" fill="#fff" stroke="${PLOT_COLOURS[k]}" stroke-width="2"/>`;
-      g += `<text x="${X(xv) + 7}" y="${Y(ym) + 14 + 12 * k}" fill="${PLOT_COLOURS[k]}">${svgEsc(me)} = ${svgEsc(plotFmt(xv))}: ${svgEsc(plotFmt(ym) + (yu.label ? ' ' + yu.label : ''))}</text>`;
+      const rt = X(xv) > W - 170;
+      g += `<text x="${X(xv) + (rt ? -7 : 7)}" y="${Y(ym) + 16 + 12 * k}" text-anchor="${rt ? 'end' : 'start'}" fill="${PLOT_COLOURS[k]}">${svgEsc(me)} = ${svgEsc(plotFmt(xv))}: ${svgEsc(plotFmt(ym) + (yu.label ? ' ' + yu.label : ''))}</text>`;
     });
   }
   const cnames = keyed.names ? splitTop(keyed.names, ';') : null;
@@ -4311,16 +4312,16 @@ function steelSVG(p) {
     g += `<circle cx="${X(su)}" cy="${Y(sw)}" r="3" fill="${RED}"/><text x="${X(su)}" y="${Y(sw) + 15}" text-anchor="middle" fill="${RED}">SC</text>`;
   }
   if (opt.warp != null && (kind === 'I' || kind === 'PFC')) {   // the warping stress across each flange: ± at the tips
-    const sv = num(opt.warp) / 1e6, bb = box[0], dh = 11;
+    const sv = num(opt.warp) / 1e6, bb = box[0], dh = 9;
     for (const w of [0, box[1]]) {
-      const y0 = w === 0 ? Y(0) - 22 : Hb + 22, sg = w === 0 ? -1 : 1, u0 = 0;
+      const y0 = w === 0 ? Y(0) - 16 : Hb + 16, sg = w === 0 ? -1 : 1, u0 = 0;
       g += `<line x1="${X(u0)}" x2="${X(u0 + bb)}" y1="${y0}" y2="${y0}" stroke="#8a929b" stroke-width="0.8"/>`;
       g += `<polygon points="${X(u0)},${y0} ${X(u0)},${y0 + sg * dh} ${X(u0 + bb)},${y0 - sg * dh} ${X(u0 + bb)},${y0}" fill="${RED}" fill-opacity="0.15" stroke="${RED}" stroke-width="0.8"/>`;
     }
     labs.push({ text: `warping stress ±${fmtNumDisplay(Math.round(Math.abs(sv) * 10) / 10)} N/mm² at the flange tips`, red: true, w: null });
   }
   if (axis) {                                                 // the load, across the axis of bending
-    if (axis === 'y') { const ax = X(uc), y1 = Y(0) - 30, y2 = Y(0) - 8; g += `<line x1="${ax}" x2="${ax}" y1="${y1}" y2="${y2}" stroke="${RED}" stroke-width="1.6"/><polygon points="${ax - 4},${y2 - 7} ${ax + 4},${y2 - 7} ${ax},${y2}" fill="${RED}"/><text x="${ax + 8}" y="${y1 + 8}" fill="${RED}">bending about y–y${hog ? ', hogging' : ''}</text>`; }
+    if (axis === 'y') { const ax = X(uc), y1 = Y(0) - (opt.warp != null ? 56 : 30), y2 = Y(0) - (opt.warp != null ? 30 : 8); g += `<line x1="${ax}" x2="${ax}" y1="${y1}" y2="${y2}" stroke="${RED}" stroke-width="1.6"/><polygon points="${ax - 4},${y2 - 7} ${ax + 4},${y2 - 7} ${ax},${y2}" fill="${RED}"/><text x="${ax + 8}" y="${y1 + 8}" fill="${RED}">bending about y–y${hog ? ', hogging' : ''}</text>`; }
     else { const ay = Y(wc), x1 = X(0) - 44, x2 = X(0) - 22; g += `<line x1="${x1}" x2="${x2}" y1="${ay - 14}" y2="${ay - 14}" stroke="${RED}" stroke-width="1.6"/><polygon points="${x2 - 7},${ay - 18} ${x2 - 7},${ay - 10} ${x2},${ay - 14}" fill="${RED}"/><text x="${x1}" y="${ay - 22}" fill="${RED}">bending about z–z</text>`; }
   }
   // ---- the labels to the right, the dimensions and the note below ----
@@ -4332,7 +4333,7 @@ function steelSVG(p) {
     ly = yy + 15;
   }
   if (cls != null) { g += `<text x="${lx}" y="${ly}" font-weight="600">Class ${cls}${comp ? ' (compression)' : axis ? '' : ''}</text>`; ly += 15; }
-  const Wt = Math.max(lx + 230, ox + 400), Hs = Math.max(Hb + ext + 22, ly);
+  const Wt = Math.max(lx + 20 + 6.2 * Math.max(30, ...labs.map(l => l.text.length + (l.hatch ? 3 : 0))), ox + 400), Hs = Math.max(Hb + ext + 22, ly);
   g += `<text x="${ox}" y="${Hs + 4}">${svgEsc(k0 + ': ' + rule + ' (mm)')}</text>`;
   g += `<text x="${ox}" y="${Hs + 19}" fill="#6b6b6b" font-size="10">Drawn from these values. A, I, W and the rest above are the section's own:</text>`;
   g += `<text x="${ox}" y="${Hs + 32}" fill="#6b6b6b" font-size="10">a different section goes back through the tool.</text>`;
