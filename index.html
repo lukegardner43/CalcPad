@@ -684,6 +684,7 @@ body.has-project{padding-left:230px}
     <div class="hpill"><code>f_ck[#MPa]</code> → value as a plain number</div>
     <div class="hpill"><code>PLOT(w*x*(L - x)/2, x, 0, L) [kNm]</code> → graph</div>
     <div class="hpill"><code>SECTION(b, h, c_nom, n, phi)</code> → section</div>
+    <div class="hpill"><code>STEEL(I, h, b, t_w, t_f, r)</code> → steel section</div>
   </div>
 </div>
 
@@ -953,6 +954,22 @@ body.has-project{padding-left:230px}
           <code>out: r_out</code> (u_out,ef) and
           <code>links: n</code> with <code>s0:</code> and
           <code>sr:</code> (perimeters of links).</div>
+        <div class="sref-i"><span>STEEL(I, h, b, t_w, t_f, r)</span></div>
+        <div class="sref-d">A steel section to scale. The kinds:
+          I (h, b, t_w, t_f, r; <code>bp:</code>, <code>tp:</code> a
+          plate below), PFC (h, b, t_w, t_f, r), RHS (h, b, t;
+          <code>ro:</code>), CHS (d, t), EHS (h, b, t), T (h, b, t_w,
+          t_f, r), ASB (h, b_t, b_b, t_w, t_f, r) and L (h, b, t,
+          r_1, r_2; <code>pair: s</code> back to back). Add any of
+          <code>axis: y</code> or <code>z</code>, <code>hog: 1</code>,
+          <code>comp: 1</code>, <code>x: z_N</code> (the neutral
+          axis below the top), <code>class: cls</code> with
+          <code>cf:</code>, <code>cw:</code>, <code>cb:</code> (each
+          part's class), <code>rhof:</code>, <code>rhow:</code>,
+          <code>psi:</code> (Class 4: the ineffective parts),
+          <code>sc: e</code> (the shear centre) and
+          <code>warp: σ_w</code>. In a PLOT,
+          <code>mark: x_m</code> marks a point on the curve.</div>
         <div class="sref-d">Click a plot to edit its line.</div>
       </div>
       <div class="sref">
@@ -3839,10 +3856,11 @@ function getAllEditors() {
 //   PLOT(expr, x, from, to) [unit]           draws expr against x from "from" to "to" (several curves: expr1; expr2)
 //   SECTION(b, h, c, n, phi, key: value, …)  draws a concrete section with its bars (keys below)
 //   PUNCH(c1, c2, d, key: value, …)          draws a column's punching perimeters in plan (keys below)
+//   STEEL(kind, dims, key: value, …)        draws a steel cross-section (kinds and keys below)
 // becomes a chip that keeps its own text (data-plot) and is redrawn from the current values at the end of every
 // rebuild, so it follows any change above it, prints and saves with the document. Click it to edit the line.
 // Values are SI inside, like every variable; [unit] (or [#unit]) sets the unit of the plotted values.
-const PLOT_RE = /^\s*(PLOT|SECTION|PUNCH)\s*\(([\s\S]*)\)\s*(?:\[([^\]]*)\])?\s*$/i;
+const PLOT_RE = /^\s*(PLOT|SECTION|PUNCH|STEEL)\s*\(([\s\S]*)\)\s*(?:\[([^\]]*)\])?\s*$/i;
 const PLOT_COLOURS = ['#1d5fbf', '#c4242a', '#247b50', '#a15c07'];
 let _plotClipId = 0;
 function parsePlotLine(text) {
@@ -3942,8 +3960,8 @@ const svgEsc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt
 function renderPlotChip(chip) {
   const p = parsePlotLine(chip.dataset.plot || '');
   try {
-    if (!p) throw new Error('write PLOT(expr, x, from, to), SECTION(b, h, c, n, phi) or PUNCH(c1, c2, d)');
-    chip.innerHTML = p.kind === 'PLOT' ? plotSVG(p) : p.kind === 'PUNCH' ? punchSVG(p) : sectionSVG(p);
+    if (!p) throw new Error('write PLOT(expr, x, from, to), SECTION(b, h, c, n, phi), PUNCH(c1, c2, d) or STEEL(I, h, b, t_w, t_f, r)');
+    chip.innerHTML = p.kind === 'PLOT' ? plotSVG(p) : p.kind === 'PUNCH' ? punchSVG(p) : p.kind === 'STEEL' ? steelSVG(p) : sectionSVG(p);
     chip.classList.remove('error'); chip.title = 'Click to edit: ' + p.src;
   } catch (e) {
     chip.classList.add('error');
@@ -3951,9 +3969,12 @@ function renderPlotChip(chip) {
     chip.title = 'Click to edit: ' + (chip.dataset.plot || '');
   }
 }
+// PLOT(expr, x, from, to, mark: x_m): mark: a value of x marked on the curve with its value (one for every curve, or one
+// per curve separated by ;)
 function plotSVG(p) {
-  const a = splitTop(p.args, ',');
-  if (a.length !== 4) throw new Error('give the expression, the variable, and where it starts and ends: PLOT(expr, x, from, to)');
+  const all = splitTop(p.args, ','), keyed = {}, a = [];
+  for (const s of all) { const m = /^([A-Za-z][A-Za-z0-9]*)\s*:\s*([\s\S]+)$/.exec(s); if (m && a.length >= 4) keyed[m[1].toLowerCase()] = m[2]; else a.push(s); }
+  if (a.length !== 4) throw new Error('give the expression, the variable, and where it starts and ends: PLOT(expr, x, from, to), then mark: x if wanted');
   const [exprs, xn, fromE, toE] = a, curves = splitTop(exprs, ';').filter(Boolean);
   if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(xn)) throw new Error('"' + xn + '" is not a variable name to plot against');
   if (!curves.length || curves.length > PLOT_COLOURS.length) throw new Error('give one to ' + PLOT_COLOURS.length + ' expressions, separated by ;');
@@ -3976,6 +3997,16 @@ function plotSVG(p) {
     const m = pts.reduce((b, q) => Math.abs(q[1]) > Math.abs(b[1]) ? q : b, pts[0]), right = X(m[0]) > W - 150;
     g += `<circle cx="${X(m[0])}" cy="${Y(m[1])}" r="3.5" fill="${PLOT_COLOURS[k]}"/><text x="${X(m[0]) + (right ? -7 : 7)}" y="${Y(m[1]) + (m[1] >= 0 ? -6 : 14)}" text-anchor="${right ? 'end' : 'start'}" font-weight="600">${svgEsc(plotFmt(m[1]) + (yu.label ? ' ' + yu.label : ''))} at ${svgEsc(xn)} = ${svgEsc(plotFmt(m[0]))}</text>`;
   });
+  if (keyed.mark) {                                         // the marked points
+    const ms = splitTop(keyed.mark, ';').filter(Boolean);
+    curves.forEach((ex, k) => {
+      const me = ms.length === 1 ? ms[0] : ms[k]; if (!me) return;
+      const xm = plotEval(me, vars), ym = plotEval(ex, { ...vars, [xn]: xm }) / yu.f, xv = xm / xu.f;
+      if (!(xv >= xt[0] && xv <= xt[xt.length - 1])) return;
+      g += `<line x1="${X(xv)}" x2="${X(xv)}" y1="${Y(ym)}" y2="${H - B}" stroke="${PLOT_COLOURS[k]}" stroke-dasharray="3 3"/><rect x="${X(xv) - 4}" y="${Y(ym) - 4}" width="8" height="8" fill="#fff" stroke="${PLOT_COLOURS[k]}" stroke-width="2"/>`;
+      g += `<text x="${X(xv) + 7}" y="${Y(ym) + 14 + 12 * k}" fill="${PLOT_COLOURS[k]}">${svgEsc(me)} = ${svgEsc(plotFmt(xv))}: ${svgEsc(plotFmt(ym) + (yu.label ? ' ' + yu.label : ''))}</text>`;
+    });
+  }
   if (curves.length > 1) curves.forEach((ex, k) => { g += `<line x1="${L}" x2="${L + 18}" y1="${10 + 16 * k}" y2="${10 + 16 * k}" stroke="${PLOT_COLOURS[k]}" stroke-width="2.5"/><text x="${L + 24}" y="${14 + 16 * k}">${svgEsc(ex)}</text>`; });
   g += `<text x="${(L + W - R) / 2}" y="${H - 6}" text-anchor="middle">${svgEsc(xn)}${xu.label ? ' [' + svgEsc(xu.label) + ']' : ''}</text>`;
   if (yu.label) g += `<text x="12" y="${(T + H - B) / 2}" text-anchor="middle" transform="rotate(-90 12 ${(T + H - B) / 2})">[${svgEsc(yu.label)}]</text>`;
@@ -4102,6 +4133,209 @@ function punchSVG(p) {
   const H = H0 + 16 * key.length + 22, W = Math.max(X(x1) + 16, 300);
   g += `<text x="${ox}" y="${H - 6}">${svgEsc(lab)}</text>`;
   return `<svg class="plot-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" font-size="11" font-family="inherit" fill="currentColor" role="img" aria-label="${svgEsc(p.src)}">${g}</svg>`;
+}
+
+// STEEL(kind, dimensions, key: value, …)
+//   a steel cross-section drawn to scale from the values, the way SECTION draws a concrete one. kind (a word, not a value):
+//   I (or H, UKB, UKC, UKBP, UB, UC): h, b, t_w, t_f, r; add bp: b_p, tp: t_p for a plate welded below (Slimflor)
+//   PFC (or U): h, b, t_w, t_f, r, the web on the left        RHS (or SHS): h, b, t; ro: the outer corner radius (1.5t)
+//   CHS: d, t        EHS: h, b, t        T (or TEE): h, b, t_w, t_f, r, the flange at the top
+//   ASB: h, b_t, b_b, t_w, t_f, r, the narrower flange at the top        L (or EA, UA): h, b, t, r_1, r_2; pair: s two
+//   angles back to back s apart
+//   Options: axis: y or z, the axis of bending (a load arrow, the axis drawn solid); hog: 1, the bottom in compression;
+//   comp: 1, the whole section in compression; x: the neutral axis, its depth below the top (z_N); class: the class of the
+//   section, with cf:, cw: (and cb:, the bottom flange of an ASB) the classes of the flange, the web (the stem of a tee):
+//   each compressed part shaded with its c/t and class, the part that sets the class in red; rhof:, rhow:, psi: a Class 4
+//   section's reduction factors (the flange outstands, the web; psi the web's stress ratio): the ineffective parts left
+//   out (BS EN 1993-1-5 Tables 4.1 and 4.2); sc: the shear centre (a channel: e from the web's centreline; a tee or an ASB:
+//   z_0 above the centroid; elsewhere the centroid); warp: the warping stress at the flange tips, drawn across the flanges.
+const STEEL_KINDS = { I: 'I', H: 'I', UKB: 'I', UKC: 'I', UKBP: 'I', UB: 'I', UC: 'I', UBP: 'I', PFC: 'PFC', U: 'PFC', RHS: 'RHS', SHS: 'RHS',
+  CHS: 'CHS', EHS: 'EHS', T: 'T', TEE: 'T', ASB: 'ASB', L: 'L', EA: 'L', UA: 'L' };
+const STEEL_DIMS = { I: ['h', 'b', 't_w', 't_f', 'r'], PFC: ['h', 'b', 't_w', 't_f', 'r'], RHS: ['h', 'b', 't'], CHS: ['d', 't'], EHS: ['h', 'b', 't'],
+  T: ['h', 'b', 't_w', 't_f', 'r'], ASB: ['h', 'b_t', 'b_b', 't_w', 't_f', 'r'], L: ['h', 'b', 't', 'r_1', 'r_2'] };
+function steelSVG(p) {
+  const { pos, opt } = plotArgs(p), k0 = String(pos[0] || '').trim().toUpperCase(), kind = STEEL_KINDS[k0];
+  if (!kind) throw new Error('start with the kind of section: STEEL(I, h, b, t_w, t_f, r); the kinds are I, PFC, RHS, CHS, EHS, T, ASB and L');
+  const names = STEEL_DIMS[kind];
+  if (pos.length !== names.length + 1) throw new Error(`give ${names.join(', ')}: STEEL(${k0}, ${names.join(', ')})`);
+  const mm = e => plotEval(e, vars) * 1000, num = e => plotEval(e, vars), on = k => opt[k] != null && num(opt[k]) > 0;
+  const v = pos.slice(1).map(mm), D = {}; names.forEach((n, i) => { D[n] = v[i]; });
+  v.forEach((x, i) => { if (!(x >= 0) || (i < 2 && !(x > 0))) throw new Error(`${names[i]} must be positive`); });
+  const f0 = x => fmtNumDisplay(Math.round(x * 10) / 10), axis = opt.axis ? String(opt.axis).trim().toLowerCase() : '';
+  if (axis && axis !== 'y' && axis !== 'z') throw new Error('axis: y or axis: z');
+  const hog = on('hog'), comp = on('comp');
+  // ---- the outline (mm, u to the right, w down from the top), its centroid (u_c, w_c) and the parts that can buckle ----
+  let path = '', box, uc, wc, rule = '', parts = [];
+  const spandrel = r => { const A = (1 - Math.PI / 4) * r * r, e = r ? r * (10 - 3 * Math.PI) / (12 - 3 * Math.PI) : 0; return { A, e }; };
+  const arc = (r, x, y, sw) => r > 0 ? ` A${r} ${r} 0 0 ${sw} ${x} ${y}` : ` L${x} ${y}`;
+  const rrect = (x, y, w, h, r) => { r = Math.max(0, Math.min(r, w / 2, h / 2)); return `M${x + r} ${y} H${x + w - r}${arc(r, x + w, y + r, 1)} V${y + h - r}${arc(r, x + w - r, y + h, 1)} H${x + r}${arc(r, x, y + h - r, 1)} V${y + r}${arc(r, x + r, y, 1)} Z`; };
+  if (kind === 'I' || kind === 'T' || kind === 'ASB') {
+    const h = D.h, tw = D.t_w, tf = D.t_f, r = D.r, bt = kind === 'ASB' ? D.b_t : D.b, bb = kind === 'ASB' ? D.b_b : kind === 'T' ? 0 : D.b;
+    const bp = kind === 'I' && opt.bp ? mm(opt.bp) : 0, tp = kind === 'I' && opt.tp ? mm(opt.tp) : 0, B = Math.max(bt, bb, bp), cx = B / 2, H = h + (bp > 0 && tp > 0 ? tp : 0);
+    if (!(tw > 0 && tf > 0 && tw < bt && (kind === 'T' || tw < bb) && (kind === 'T' ? tf < h : 2 * tf < h))) throw new Error('the web must be thinner than the flanges are wide, and the flanges thinner than half the depth');
+    const yb = h, rb = kind === 'T' ? 0 : r;
+    path = `M${cx - bt / 2} 0 H${cx + bt / 2} V${tf} H${cx + tw / 2 + r}${arc(r, cx + tw / 2, tf + r, 0)}`;
+    path += kind === 'T' ? ` V${h} H${cx - tw / 2}` : ` V${yb - tf - rb}${arc(rb, cx + tw / 2 + rb, yb - tf, 0)} H${cx + bb / 2} V${yb} H${cx - bb / 2} V${yb - tf} H${cx - tw / 2 - rb}${arc(rb, cx - tw / 2, yb - tf - rb, 0)}`;
+    path += ` V${tf + r}${arc(r, cx - tw / 2 - r, tf, 0)} H${cx - bt / 2} Z`;
+    if (bp > 0 && tp > 0) path += ` M${cx - bp / 2} ${h} H${cx + bp / 2} V${h + tp} H${cx - bp / 2} Z`;
+    // the centroid: the plates and the fillets
+    const s = spandrel(r), sb = spandrel(rb), hw = kind === 'T' ? h - tf : h - 2 * tf;
+    const items = [[bt * tf, tf / 2], [bb * tf, h - tf / 2], [hw * tw, tf + hw / 2], [2 * s.A, tf + s.e], [2 * sb.A, h - tf - sb.e], [bp * tp, h + tp / 2]];
+    const A = items.reduce((a, q) => a + q[0], 0); wc = items.reduce((a, q) => a + q[0] * q[1], 0) / A; uc = cx; box = [B, H];
+    // the parts: each flange's two outstands, the web (internal) or the tee's stem (an outstand from the root of the fillet)
+    const cT = (bt - tw - 2 * r) / 2, cB = (bb - tw - 2 * rb) / 2;
+    parts.push({ key: 'cf', label: kind === 'ASB' ? 'top flange' : 'flange', ratio: cT / tf, rects: [[cx - bt / 2, 0, cT, tf], [cx + bt / 2 - cT, 0, cT, tf]], side: 'top', out: true, c: cT, t: tf });
+    if (kind !== 'T') parts.push({ key: kind === 'ASB' ? 'cb' : 'cf', label: kind === 'ASB' ? 'bottom flange' : 'flange', ratio: cB / tf, rects: [[cx - bb / 2, h - tf, cB, tf], [cx + bb / 2 - cB, h - tf, cB, tf]], side: 'bot', out: true, c: cB, t: tf });
+    if (kind === 'T') parts.push({ key: 'cw', label: 'stem', ratio: (h - tf - r) / tw, web: [cx - tw / 2, tf + r, tw, h - tf - r], stem: true, c: h - tf - r, t: tw });
+    else parts.push({ key: 'cw', label: 'web', ratio: (h - 2 * tf - r - rb) / tw, web: [cx - tw / 2, tf + r, tw, h - 2 * tf - r - rb], c: h - 2 * tf - r - rb, t: tw });
+    rule = kind === 'ASB' ? `h ${f0(h)} · b_t ${f0(bt)} · b_b ${f0(bb)} · t_w ${f0(tw)} · t_f ${f0(tf)} · r ${f0(r)}` : `h ${f0(h)} · b ${f0(bt)} · t_w ${f0(tw)} · t_f ${f0(tf)} · r ${f0(r)}${bp > 0 && tp > 0 ? ` · plate ${f0(bp)} × ${f0(tp)}` : ''}`;
+  } else if (kind === 'PFC') {
+    const { h, b, t_w: tw, t_f: tf, r } = D;
+    if (!(tw < b && 2 * tf < h)) throw new Error('the web must be thinner than the flanges are wide, and the flanges thinner than half the depth');
+    path = `M0 0 H${b} V${tf} H${tw + r}${arc(r, tw, tf + r, 0)} V${h - tf - r}${arc(r, tw + r, h - tf, 0)} H${b} V${h} H0 Z`;
+    const s = spandrel(r), items = [[2 * b * tf, b / 2], [(h - 2 * tf) * tw, tw / 2], [2 * s.A, tw + s.e]], A = items.reduce((a, q) => a + q[0], 0);
+    uc = items.reduce((a, q) => a + q[0] * q[1], 0) / A; wc = h / 2; box = [b, h];
+    const cF = b - tw - r;
+    parts.push({ key: 'cf', label: 'flange', ratio: cF / tf, rects: [[tw + r, 0, cF, tf]], side: 'top', out: true, c: cF, t: tf, one: true });
+    parts.push({ key: 'cf', label: 'flange', ratio: cF / tf, rects: [[tw + r, h - tf, cF, tf]], side: 'bot', out: true, c: cF, t: tf, one: true });
+    parts.push({ key: 'cw', label: 'web', ratio: (h - 2 * tf - 2 * r) / tw, web: [0, tf + r, tw, h - 2 * tf - 2 * r], c: h - 2 * tf - 2 * r, t: tw });
+    rule = `h ${f0(h)} · b ${f0(b)} · t_w ${f0(tw)} · t_f ${f0(tf)} · r ${f0(r)}`;
+  } else if (kind === 'RHS') {
+    const { h, b, t } = D, ro = opt.ro ? mm(opt.ro) : 1.5 * t, ri = Math.max(0, ro - t);
+    if (!(2 * t < Math.min(h, b))) throw new Error('t must be less than half the width');
+    path = rrect(0, 0, b, h, ro) + ' ' + rrect(t, t, b - 2 * t, h - 2 * t, ri); uc = b / 2; wc = h / 2; box = [b, h];
+    const cF = b - 3 * t, cW = h - 3 * t;
+    parts.push({ key: 'cf', label: 'flange', ratio: cF / t, rects: [[1.5 * t, 0, cF, t]], side: 'top', internal: true, c: cF, t });
+    parts.push({ key: 'cf', label: 'flange', ratio: cF / t, rects: [[1.5 * t, h - t, cF, t]], side: 'bot', internal: true, c: cF, t });
+    parts.push({ key: 'cw', label: 'web', ratio: cW / t, web: [0, 1.5 * t, t, cW], web2: b - t, c: cW, t });
+    rule = `h ${f0(h)} · b ${f0(b)} · t ${f0(t)} · r_o ${f0(ro)}`;
+  } else if (kind === 'CHS' || kind === 'EHS') {
+    const t = D.t, a = kind === 'CHS' ? D.d / 2 : D.h / 2, c = kind === 'CHS' ? D.d / 2 : D.b / 2;
+    if (!(t < Math.min(a, c))) throw new Error('t must be less than the radius');
+    const el = (rx, ry, sw) => `M${c - rx} ${a} a${rx} ${ry} 0 1 ${sw} ${2 * rx} 0 a${rx} ${ry} 0 1 ${sw} ${-2 * rx} 0 Z`;
+    path = el(c, a, 0) + ' ' + el(c - t, a - t, 1); uc = c; wc = a; box = [2 * c, 2 * a];
+    parts.push({ key: 'cw', label: kind === 'CHS' ? 'wall, d/t' : 'wall', ratio: kind === 'CHS' ? D.d / t : null, tube: true, rlab: '' });
+    rule = kind === 'CHS' ? `d ${f0(D.d)} · t ${f0(t)}` : `h ${f0(D.h)} · b ${f0(D.b)} · t ${f0(t)}`;
+  } else {                                                    // angles: the long leg vertical, the short one along the bottom
+    const { h, b, t, r_1: r1, r_2: r2 } = D, pair = opt.pair != null ? mm(opt.pair) : null;
+    if (!(t < Math.min(h, b))) throw new Error('t must be less than the legs');
+    const one = (x0, m) => { const X = u => x0 + m * u, sw = s => (m > 0 ? s : 1 - s);
+      return `M${X(0)} 0 H${X(t - r2)}${arc(r2, X(t), r2, sw(1))} V${h - t - r1}${arc(r1, X(t + r1), h - t, sw(0))} H${X(b - r2)}${arc(r2, X(b), h - t + r2, sw(1))} V${h} H${X(0)} Z`; };
+    const s1 = spandrel(r1), A1 = h * t + (b - t) * t + s1.A, cu = (h * t * t / 2 + (b - t) * t * (t + (b - t) / 2) + s1.A * (t + s1.e)) / A1, cw_ = (h * t * h / 2 + (b - t) * t * (h - t / 2) + s1.A * (h - t - s1.e)) / A1;
+    if (pair != null) { path = one(b, -1) + ' ' + one(b + pair, 1); uc = b + pair / 2; wc = cw_; box = [2 * b + pair, h]; }
+    else {
+      path = one(0, 1); uc = cu; wc = cw_; box = [b, h];
+      // the principal axes (the plates): tan 2α = −2I_yz/(I_y − I_z), y along the short leg, z along the long one
+      const R = [[t, h, t / 2, h / 2], [b - t, t, t + (b - t) / 2, h - t / 2]];
+      let Iy = 0, Iz = 0, Iyz = 0; for (const [w, hh, u, ww] of R) { Iy += w * hh ** 3 / 12 + w * hh * (ww - cw_) ** 2; Iz += hh * w ** 3 / 12 + w * hh * (u - cu) ** 2; Iyz += w * hh * (u - cu) * (ww - cw_); }
+      parts.alpha = 0.5 * Math.atan2(2 * Iyz, Iy - Iz);      // the major axis u, anticlockwise from y
+    }
+    parts.push({ key: 'cf', label: 'leg', ratio: h / t, angle: true, rlab: ' h/t' });
+    rule = `${f0(h)} × ${f0(b)} × ${f0(t)} · r_1 ${f0(r1)} · r_2 ${f0(r2)}${pair != null ? ` · two, ${f0(pair)} apart` : ''}`;
+  }
+  // ---- scale and frame: the section in a 230 px box, the labels to the right ----
+  const s = Math.min(230 / box[0], 250 / box[1]), ox = 64, oy = 34 + (axis ? 22 : 0) + (opt.warp != null ? 22 : 0), X = u => ox + u * s, Y = w => oy + w * s;
+  const clip = 'plotclip' + (++_plotClipId), RED = '#c4242a', BLUE = '#1d5fbf';
+  let g = `<defs><clipPath id="${clip}"><path d="${path}" transform="translate(${ox} ${oy}) scale(${s})" fill-rule="evenodd"/></clipPath>`
+    + `<pattern id="${clip}h" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="5" stroke="${RED}" stroke-width="1"/></pattern></defs>`;
+  g += `<path d="${path}" transform="translate(${ox} ${oy}) scale(${s})" fill="#e7ebf0" fill-rule="evenodd" stroke="#333" stroke-width="${(1.2 / s).toFixed(4)}"/>`;
+  // ---- the compressed parts, with their classes ----
+  const cls = opt.class != null ? Math.round(num(opt.class)) : null, pc = {};
+  for (const k of ['cf', 'cw', 'cb']) if (opt[k] != null) pc[k] = Math.round(num(opt[k]));
+  const xNA = opt.x != null ? mm(opt.x) : null, H0 = box[1];
+  // the compressed band in depth: the whole section (comp), from the top to the neutral axis (sagging), below it (hogging)
+  const band = comp ? [0, H0] : axis === 'z' ? [0, H0] : xNA != null ? (hog ? [xNA, H0] : [0, xNA]) : (hog ? [wc, H0] : [0, wc]);
+  const fillOf = c => c >= 4 ? RED : c === 3 ? '#a15c07' : BLUE, labs = [];
+  const worst = cls != null ? cls : Math.max(0, ...Object.values(pc));
+  const usedKeys = new Set();
+  if (Object.keys(pc).length || cls != null) for (const pt of parts) {
+    const c = pc[pt.key] ?? (pt.tube || pt.angle ? cls : null); if (c == null) continue;
+    const red = worst > 1 && c === worst;
+    let drawn = false;
+    if (pt.rects) {                                           // flanges: compressed when the band reaches them (or both ways for axis z)
+      const inBand = axis === 'z' || comp || (pt.side === 'top' ? band[0] < 1e-6 : band[1] > H0 - 1e-6);
+      if (!inBand) continue;
+      for (const [u, w, wd, ht] of pt.rects) g += `<rect x="${X(u)}" y="${Y(w)}" width="${wd * s}" height="${ht * s}" fill="${fillOf(c)}" fill-opacity="0.28" stroke="${red ? RED : 'none'}" stroke-width="1.4"/>`;
+      drawn = true;
+    } else if (pt.web) {
+      const [u, w, wd, ht] = pt.web, w0 = Math.max(w, band[0]), w1 = Math.min(w + ht, band[1]);
+      if (w1 > w0) { for (const uu of pt.web2 != null ? [u, pt.web2] : [u]) g += `<rect x="${X(uu)}" y="${Y(w0)}" width="${wd * s}" height="${(w1 - w0) * s}" fill="${fillOf(c)}" fill-opacity="0.28" stroke="${red ? RED : 'none'}" stroke-width="1.4"/>`; drawn = true; }
+      else drawn = true;   // a web wholly in tension still has its class (1)
+    } else if (pt.tube || pt.angle) { g += `<path d="${path}" transform="translate(${ox} ${oy}) scale(${s})" fill="${fillOf(c)}" fill-opacity="0.22" fill-rule="evenodd" stroke="${red ? RED : 'none'}" stroke-width="${(1.4 / s).toFixed(4)}"/>`; drawn = true; }
+    const lk = pt.key + (pt.side || '');
+    if (drawn && !usedKeys.has(pt.label)) { usedKeys.add(pt.label); labs.push({ text: `${pt.label}${pt.ratio != null ? `${pt.rlab != null ? pt.rlab : ' c/t'} ${fmtNumDisplay(Math.round(pt.ratio * 100) / 100)}` : ''}: Class ${c}`, red, w: pt.rects ? pt.rects[0][1] + pt.rects[0][3] / 2 : pt.web ? pt.web[1] + pt.web[3] / 2 : wc, key: lk }); }
+  }
+  // ---- Class 4: the ineffective parts (EN 1993-1-5 Tables 4.1, 4.2) ----
+  const rhof = opt.rhof != null ? num(opt.rhof) : null, rhow = opt.rhow != null ? num(opt.rhow) : null, psi = opt.psi != null ? num(opt.psi) : 1;
+  const hole = (u, w, wd, ht) => `<rect x="${X(u)}" y="${Y(w)}" width="${Math.max(0, wd) * s}" height="${Math.max(0, ht) * s}" fill="#fff"/><rect x="${X(u)}" y="${Y(w)}" width="${Math.max(0, wd) * s}" height="${Math.max(0, ht) * s}" fill="url(#${clip}h)" stroke="${RED}" stroke-width="0.8"/>`;
+  let holes = '';
+  if (rhof != null && rhof < 1) for (const pt of parts) {
+    if (!pt.rects) continue;
+    const inBand = comp || axis === 'z' || (pt.side === 'top' ? band[0] < 1e-6 : band[1] > H0 - 1e-6); if (!inBand) continue;
+    const lost = (1 - Math.max(0, rhof)) * pt.c;
+    for (const [u, w, wd, ht] of pt.rects) {
+      if (pt.internal) holes += hole(u + (wd - lost) / 2, w, lost, ht);
+      else if (pt.one) holes += hole(u + wd - lost, w, lost, ht);                 // a channel's flange: its tip
+      else holes += hole(u < uc ? u : u + wd - lost, w, lost, ht);                // an I's outstands: the tips
+    }
+  }
+  if (rhow != null && rhow < 1) {
+    const pw = parts.find(q => q.web); if (pw) {
+      const [u, w, wd, ht] = pw.web, c = ht, rho = Math.max(0, rhow);
+      let a, b;                                               // the hole, from the compressed edge
+      if (pw.stem) { const bc = psi < 0 ? c / (1 - psi) : c, beff = rho * bc; if (hog) { a = 0; b = bc - beff; } else { a = beff; b = bc; } }
+      else if (psi < 0) { const bc = c / (1 - psi), beff = rho * bc; a = 0.4 * beff; b = bc - 0.6 * beff; }
+      else { const beff = rho * c, be1 = 2 * beff / (5 - psi); a = be1; b = c - (beff - be1); }
+      const top = pw.stem ? (hog ? w + ht - b : w + a) : (hog ? w + ht - b : w + a);
+      for (const uu of pw.web2 != null ? [u, pw.web2] : [u]) holes += hole(uu, top, wd, b - a);
+    }
+  }
+  g += holes;
+  if (holes) labs.push({ text: 'ineffective (Class 4)', red: true, w: null, hatch: true });
+  // ---- the axes through the centroid, the neutral axis, the shear centre ----
+  const W0 = X(box[0]), Hb = Y(box[1]), ext = opt.warp != null ? 38 : 16;
+  const lineY = axis === 'y' ? `stroke="${BLUE}" stroke-width="1.4"` : `stroke="#8a929b" stroke-width="0.8" stroke-dasharray="10 3 2 3"`;
+  const lineZ = axis === 'z' ? `stroke="${BLUE}" stroke-width="1.4"` : `stroke="#8a929b" stroke-width="0.8" stroke-dasharray="10 3 2 3"`;
+  g += `<line x1="${X(0) - ext}" x2="${W0 + ext}" y1="${Y(wc)}" y2="${Y(wc)}" ${lineY}/><text x="${X(0) - ext - 4}" y="${Y(wc) + 4}" text-anchor="end">y</text>`;
+  g += `<line x1="${X(uc)}" x2="${X(uc)}" y1="${Y(0) - ext}" y2="${Hb + ext}" ${lineZ}/><text x="${X(uc)}" y="${Hb + ext + 11}" text-anchor="middle">z</text>`;
+  if (parts.alpha != null) {                                  // a single angle's principal axes, v the minor
+    const a = parts.alpha, L = 0.5 * Math.max(box[0], box[1]) * s, cxp = X(uc), cyp = Y(wc), du = Math.cos(a) * L, dv = Math.sin(a) * L;
+    g += `<line x1="${cxp - du}" y1="${cyp + dv}" x2="${cxp + du}" y2="${cyp - dv}" stroke="#8a929b" stroke-width="0.8" stroke-dasharray="4 3"/><text x="${cxp + du + 3}" y="${cyp - dv}">u</text>`;
+    g += `<line x1="${cxp + dv}" y1="${cyp + du}" x2="${cxp - dv}" y2="${cyp - du}" stroke="#8a929b" stroke-width="0.8" stroke-dasharray="4 3"/><text x="${cxp - dv + 3}" y="${cyp - du - 2}">v</text>`;
+  }
+  if (xNA != null && axis !== 'z' && xNA > 0 && xNA < H0) { g += `<line x1="${X(0) - 6}" x2="${W0 + 6}" y1="${Y(xNA)}" y2="${Y(xNA)}" stroke="${BLUE}" stroke-dasharray="5 3"/>`; labs.push({ text: `neutral axis (dashed), ${f0(xNA)} below the top`, blue: true, w: null }); }
+  if (opt.sc != null) {
+    const e = mm(opt.sc), su = kind === 'PFC' ? D.t_w / 2 - e : uc, sw = kind === 'T' || kind === 'ASB' ? wc - e : wc;
+    g += `<circle cx="${X(su)}" cy="${Y(sw)}" r="3" fill="${RED}"/><text x="${X(su)}" y="${Y(sw) + 15}" text-anchor="middle" fill="${RED}">SC</text>`;
+  }
+  if (opt.warp != null && (kind === 'I' || kind === 'PFC')) {   // the warping stress across each flange: ± at the tips
+    const sv = num(opt.warp) / 1e6, bb = box[0], dh = 11;
+    for (const w of [0, box[1]]) {
+      const y0 = w === 0 ? Y(0) - 22 : Hb + 22, sg = w === 0 ? -1 : 1, u0 = 0;
+      g += `<line x1="${X(u0)}" x2="${X(u0 + bb)}" y1="${y0}" y2="${y0}" stroke="#8a929b" stroke-width="0.8"/>`;
+      g += `<polygon points="${X(u0)},${y0} ${X(u0)},${y0 + sg * dh} ${X(u0 + bb)},${y0 - sg * dh} ${X(u0 + bb)},${y0}" fill="${RED}" fill-opacity="0.15" stroke="${RED}" stroke-width="0.8"/>`;
+    }
+    labs.push({ text: `warping stress ±${fmtNumDisplay(Math.round(Math.abs(sv) * 10) / 10)} N/mm² at the flange tips`, red: true, w: null });
+  }
+  if (axis) {                                                 // the load, across the axis of bending
+    if (axis === 'y') { const ax = X(uc), y1 = Y(0) - 30, y2 = Y(0) - 8; g += `<line x1="${ax}" x2="${ax}" y1="${y1}" y2="${y2}" stroke="${RED}" stroke-width="1.6"/><polygon points="${ax - 4},${y2 - 7} ${ax + 4},${y2 - 7} ${ax},${y2}" fill="${RED}"/><text x="${ax + 8}" y="${y1 + 8}" fill="${RED}">bending about y–y${hog ? ', hogging' : ''}</text>`; }
+    else { const ay = Y(wc), x1 = X(0) - 44, x2 = X(0) - 22; g += `<line x1="${x1}" x2="${x2}" y1="${ay - 14}" y2="${ay - 14}" stroke="${RED}" stroke-width="1.6"/><polygon points="${x2 - 7},${ay - 18} ${x2 - 7},${ay - 10} ${x2},${ay - 14}" fill="${RED}"/><text x="${x1}" y="${ay - 22}" fill="${RED}">bending about z–z</text>`; }
+  }
+  // ---- the labels to the right, the dimensions and the note below ----
+  let ly = Y(0) + 4, lx = W0 + ext + 18;
+  for (const l of labs) {
+    const yy = l.w != null ? Math.max(ly, Y(l.w) + 4) : ly;
+    if (l.hatch) g += `<rect x="${lx}" y="${yy - 9}" width="12" height="10" fill="url(#${clip}h)" stroke="${RED}" stroke-width="0.8"/>`;
+    g += `<text x="${lx + (l.hatch ? 16 : 0)}" y="${yy}" fill="${l.red ? RED : l.blue ? BLUE : 'currentColor'}"${l.red ? ' font-weight="600"' : ''}>${svgEsc(l.text)}</text>`;
+    ly = yy + 15;
+  }
+  if (cls != null) { g += `<text x="${lx}" y="${ly}" font-weight="600">Class ${cls}${comp ? ' (compression)' : axis ? '' : ''}</text>`; ly += 15; }
+  const Wt = Math.max(lx + 230, ox + 400), Hs = Math.max(Hb + ext + 22, ly);
+  g += `<text x="${ox}" y="${Hs + 4}">${svgEsc(k0 + ': ' + rule + ' (mm)')}</text>`;
+  g += `<text x="${ox}" y="${Hs + 19}" fill="#6b6b6b" font-size="10">Drawn from these values. A, I, W and the rest above are the section's own:</text>`;
+  g += `<text x="${ox}" y="${Hs + 32}" fill="#6b6b6b" font-size="10">a different section goes back through the tool.</text>`;
+  const Ht = Hs + 40;
+  return `<svg class="plot-svg" viewBox="0 0 ${Wt} ${Ht}" width="${Wt}" height="${Ht}" font-size="11" font-family="inherit" fill="currentColor" role="img" aria-label="${svgEsc(p.src)}">${g}</svg>`;
 }
 
 // ══ SHARED VALUES IN A PACK ══════════════════════════════════════
