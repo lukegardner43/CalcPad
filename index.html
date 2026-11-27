@@ -6028,10 +6028,19 @@ function commitTableCell(cell) {
   const table = cell.closest('.calc-table');
   if (!table) return;
   const txt = cell.textContent.trim();
+  const showingOwnResult = () => {
+    const res = cell.dataset.formula && evalTableFormula(table, cell);
+    return res && txt === res.text;
+  };
   if (/^=/.test(txt) && parseTableFormula(txt)) {
     cell.dataset.formula = txt; cell.classList.add('tbl-calc');
+  } else if (showingOwnResult()) {
+    // Untouched: the cell shows what its formula gives, so the formula stays.
   } else {
     delete cell.dataset.formula; delete cell.dataset.value; cell.classList.remove('tbl-calc');
+    if (cell.dataset.autoname) {   // a name it only had for being a total
+      delete cell.dataset.varname; delete cell.dataset.autoname; cell.removeAttribute('title');
+    }
   }
   recomputeTableFormulas(table);
   rebuildVars();
@@ -6148,6 +6157,7 @@ function evalTableFormula(table, cell) {
 function recomputeTableFormulas(table) {
   const cells = Array.from(table.querySelectorAll('td[data-formula], th[data-formula]'));
   if (!cells.length) return;
+  autoNameTableResults(table);
   // Several passes so totals that depend on other totals converge.
   const passes = Math.min(cells.length, 10);
   for (let p = 0; p < passes; p++) {
@@ -6207,25 +6217,40 @@ function uniqueVarName(base, exceptCell) {
   for (let n = 2; ; n++) if (!taken.has(base + n)) return base + n;
 }
 
-function suggestedTotalName(table, cell, dir) {
+const TBL_RESULT_SUFFIX = { sum: 'Total', avg: 'Avg', average: 'Avg', mean: 'Avg',
+  min: 'Min', max: 'Max', count: 'Count', product: 'Product', prod: 'Product' };
+function suggestedTotalName(table, cell, dir, fn) {
   const base = nameFromLabel(tableTotalLabel(table, cell, dir));
-  return base ? uniqueVarName(base + '_Total', cell) : '';
+  return base ? uniqueVarName(base + '_' + (TBL_RESULT_SUFFIX[fn] || 'Total'), cell) : '';
 }
 
-// Σ Column and Σ Row name their result straight away — "Dead_Total" under a
-// "Dead" heading — so it can be used in the calculation below the table without
-// a trip to the Name dialog. A cell that already has a name keeps it: names are
-// what formulas elsewhere refer to, so one is never changed behind your back.
+// Every table result is a variable, however it got there: Σ button, typed
+// =sum(above), or a document saved before totals were named. A cell already
+// named keeps its name — formulas elsewhere refer to it — and one whose name
+// was cleared in the Name dialog (data-noname) stays unnamed.
+function autoNameTableResults(table) {
+  table.querySelectorAll('td[data-formula], th[data-formula]').forEach(cell => {
+    if (cell.dataset.varname || cell.dataset.noname) return;
+    const f = parseTableFormula(cell.dataset.formula);
+    if (!f) return;
+    const name = suggestedTotalName(table, cell, f.dir, f.fn);
+    if (name) { cell.dataset.varname = name; cell.dataset.autoname = '1'; }
+  });
+}
+
+// Σ Column and Σ Row: the result is named straight away ("Dead_Total" under a
+// "Dead" heading, see autoNameTableResults) so it can be used below the table.
 function tblInsertFormula(dir) {
   if (!activeTable || !activeCell) return;
   activeCell.dataset.formula = '=sum(' + dir + ')';
   activeCell.classList.add('tbl-calc');
-  if (!activeCell.dataset.varname) {
-    const name = suggestedTotalName(activeTable, activeCell, dir);
-    if (name) activeCell.dataset.varname = name;
-  }
   // Evaluate immediately — focusout fires before the click so we can't rely on it.
   recomputeTableFormulas(activeTable);
+  // The caret is still in this cell, and recompute leaves the cell being edited
+  // alone, so it stayed blank — and leaving a blank cell read as the formula
+  // having been deleted, which wiped the total. Show the result now.
+  const res = evalTableFormula(activeTable, activeCell);
+  if (res) activeCell.textContent = res.text;
   rebuildVars();
   isDirty = true; autoSave();
 }
@@ -6238,8 +6263,8 @@ function tblNameVariable() {
   const unitInp = document.getElementById('tblVarUnitInput');
   let suggestion = '';
   const f = parseTableFormula(_tblVarCell.dataset.formula || '');
-  if (!_tblVarCell.dataset.varname && f && f.fn === 'sum')
-    suggestion = suggestedTotalName(_tblVarTable, _tblVarCell, f.dir);
+  if (!_tblVarCell.dataset.varname && f)
+    suggestion = suggestedTotalName(_tblVarTable, _tblVarCell, f.dir, f.fn);
   inp.value = _tblVarCell.dataset.varname || suggestion;
   inp.style.borderColor = '#ccc';
   unitInp.value = _tblVarCell.dataset.varunit || '';
@@ -6257,11 +6282,14 @@ function tblVarModalOk() {
   }
   document.getElementById('tblVarModal').style.display = 'none';
   if (!_tblVarCell) return;
+  delete _tblVarCell.dataset.autoname;     // named or cleared by hand: yours now
   if (!trimmed) {
     delete _tblVarCell.dataset.varname;
     delete _tblVarCell.dataset.varunit;
     _tblVarCell.removeAttribute('title');   // its "double-click to rename" no longer applies
+    if (_tblVarCell.dataset.formula) _tblVarCell.dataset.noname = '1';  // and don't name it again
   } else {
+    delete _tblVarCell.dataset.noname;
     _tblVarCell.dataset.varname = trimmed;
     if (unitTrimmed) _tblVarCell.dataset.varunit = unitTrimmed;
     else delete _tblVarCell.dataset.varunit;
