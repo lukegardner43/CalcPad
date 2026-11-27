@@ -882,7 +882,7 @@ body.has-project{padding-left:230px}
         <div id="editor" class="calc-area" contenteditable="true" spellcheck="true"
           data-placeholder="Begin calculations… type x = 42 then Enter to define a variable, =x^2+3 then Enter for a formula."></div>
       </div>
-      <div class="pg-footer">Alpha — updated 13.07.26</div>
+      <div class="pg-footer">Alpha — updated 27.11.26</div>
     </div>
 
     <!-- Sidebar (only shown next to page 1) -->
@@ -1075,9 +1075,23 @@ const UNIT_PREF_GROUPS = [
 const DEFAULT_PREFERRED_UNITS = { m: 'm', N: 'N', kg: 'kg', Pa: 'Pa', 'N·m': 'kN·m', s: 's', rad: 'rad' };
 let preferredUnits = { ...DEFAULT_PREFERRED_UNITS };
 
-// Footer "updated" date — the date the tool itself was last updated (build date),
-// shown as DD.MM.YY. Bump this whenever the app code changes.
-const FOOTER_TEXT = 'Alpha — updated 13.07.26';
+// Footer "updated" date — the date the tool itself was last updated, DD.MM.YY.
+// On the live site it comes from the server: GitHub Pages stamps every file it
+// serves with the time of the deploy, so the date moves on its own whenever main
+// changes, whoever changes it. TOOL_UPDATED is only the fallback, for a copy
+// opened from disk or a server that sends no date; bump it with each change.
+const TOOL_UPDATED = '27.11.26';
+function toolUpdatedDate() {
+  if (!/^https?:$/.test(location.protocol)) return TOOL_UPDATED; // a file's date is when it was saved
+  const d = new Date(document.lastModified);
+  // With no Last-Modified header the browser reports the time the page was
+  // opened, which would claim every visit is a fresh update. A real deploy
+  // date is before this visit began; the margin covers whole-second rounding.
+  if (isNaN(d) || d.getTime() > performance.timeOrigin - 2000) return TOOL_UPDATED;
+  const p2 = n => String(n).padStart(2, '0');
+  return p2(d.getDate()) + '.' + p2(d.getMonth() + 1) + '.' + String(d.getFullYear()).slice(-2);
+}
+const FOOTER_TEXT = 'Alpha — updated ' + toolUpdatedDate();
 
 // ── Variable store ─────────────────────────────────────────
 
