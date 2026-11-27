@@ -416,7 +416,19 @@ body.has-project{padding-left:230px}
 .calc-table td.tbl-calc:focus,.calc-table th.tbl-calc:focus{background:#fff8fe}
 .calc-table td[data-varname],.calc-table th[data-varname]{border-left:2px solid var(--purple)}
 .calc-table td[data-varname]::before,.calc-table th[data-varname]::before{
-  content:attr(data-varname) " = ";color:var(--purple);font-weight:600;font-style:italic}
+  color:var(--purple);font-weight:600;font-style:italic}
+/* A table variable's name shows only in the cell you are in (tbl-sel). Off it,
+   the purple edge alone says the cell is a variable; hover gives its name. While
+   the cell shows its formula (tbl-eq: text starts with "="), drop the "=" of the
+   label so it reads "Load_Total =sum(above)", not "Load_Total = =sum(above)". */
+.calc-table td[data-varname].tbl-sel::before,.calc-table th[data-varname].tbl-sel::before{
+  content:attr(data-varname) " = "}
+.calc-table td[data-varname].tbl-sel.tbl-eq::before,.calc-table th[data-varname].tbl-sel.tbl-eq::before{
+  content:attr(data-varname) " "}
+@media print{
+  .calc-table td[data-varname]::before,.calc-table th[data-varname]::before{content:none!important}
+  .calc-table td[data-varname],.calc-table th[data-varname]{border-left:1px solid var(--bdr)}
+}
 .calc-table tr{break-inside:avoid;page-break-inside:avoid}
 .tbl-toolbar{display:none;position:fixed;z-index:250;background:#fff;border:1px solid #ddd;
   border-radius:3px;box-shadow:0 2px 8px rgba(0,0,0,.12);padding:3px 5px;gap:2px;align-items:center;
@@ -5666,6 +5678,7 @@ function sanitisePastedChunk(html) {
     });
     el.removeAttribute('data-reflow-split');
     el.removeAttribute('data-tbl-handlers');
+    el.classList.remove('tbl-sel', 'tbl-eq');
     if (el.classList.contains('var-def-chip') || el.classList.contains('formula-chip') || el.classList.contains('plot-chip')) {
       el.classList.remove('chip-flash', 'dup-name');
       el.contentEditable = 'false';
@@ -6054,6 +6067,16 @@ function placeCaretAtEnd(el) {
   sel.removeAllRanges(); sel.addRange(r);
 }
 
+// Whether the cell is showing a formula rather than its result — the label
+// before it drops its own "=" then (see .tbl-eq in the CSS).
+function markTblEq(cell) {
+  cell.classList.toggle('tbl-eq', /^\s*=/.test(cell.textContent));
+}
+document.addEventListener('input', () => {
+  const cell = _tblSelCell;
+  if (cell && cell.isConnected) markTblEq(cell);
+});
+
 function revealCellFormula(cell) {
   if (cell.dataset.formula && cell.textContent !== cell.dataset.formula) {
     cell.textContent = cell.dataset.formula;
@@ -6069,11 +6092,15 @@ document.addEventListener('selectionchange', () => {
   // Skip the commit while a toolbar button press is in flight — the action
   // updates dataset.formula itself (same guard the old focusout flow used).
   if (prev && prev.isConnected && !_tblBarActive) commitTableCell(prev);
+  // Only the cell you are in shows its variable name (see .tbl-sel in the CSS).
+  document.querySelectorAll('.tbl-sel').forEach(c => { if (c !== cell) c.classList.remove('tbl-sel', 'tbl-eq'); });
   if (cell) {
     activeTable = cell.closest('.calc-table');
     activeCell = cell;
     showTableToolbar(activeTable, cell);
     revealCellFormula(cell);
+    cell.classList.add('tbl-sel');
+    markTblEq(cell);
   } else if (prev) {
     hideTableToolbar();
   }
@@ -6251,6 +6278,7 @@ function tblInsertFormula(dir) {
   // having been deleted, which wiped the total. Show the result now.
   const res = evalTableFormula(activeTable, activeCell);
   if (res) activeCell.textContent = res.text;
+  markTblEq(activeCell);
   rebuildVars();
   isDirty = true; autoSave();
 }
@@ -6491,6 +6519,7 @@ function bareHtml(ed) {
     ch.dataset.bare = '1';
   });
   c.querySelectorAll('.plot-chip').forEach(ch => { ch.textContent = ch.dataset.plot || ''; });
+  c.querySelectorAll('.tbl-sel, .tbl-eq').forEach(x => x.classList.remove('tbl-sel', 'tbl-eq'));
   return c.innerHTML.replace(/ data-tbl-handlers="1"/g, '');
 }
 // After a rebuild: draw the chips that came in as definitions only (rebuildVars draws formulas and expressions as it
