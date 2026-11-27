@@ -6102,14 +6102,15 @@ function evalTableFormula(table, cell) {
 
   const nums = []; let unit = null, unitSeen = false, unitConsistent = true;
   contrib.forEach(c => {
-    let v;
+    let v, u;
     if (c.dataset.formula && c.dataset.value !== undefined && c.dataset.value !== '') {
       v = parseFloat(c.dataset.value); // use another formula cell's cached result
+      u = c.dataset.cunit;             // and its unit, so a total of totals keeps kN
     } else {
       const p = parseCellNumber(c.textContent);
-      v = p.num;
-      if (p.unit) { if (!unitSeen) { unit = p.unit; unitSeen = true; } else if (p.unit !== unit) unitConsistent = false; }
+      v = p.num; u = p.unit;
     }
+    if (u) { if (!unitSeen) { unit = u; unitSeen = true; } else if (u !== unit) unitConsistent = false; }
     if (v == null || isNaN(v)) return;
     nums.push(v);
   });
@@ -6151,10 +6152,64 @@ function recomputeTableFormulas(table) {
     if (!changed) break;
   }
 }
+// The label a total belongs to: the column's heading for a column sum, the
+// row's label for a row sum. A label is the first cell along that line holding
+// text that is not a number — the same test that keeps headings out of the sum.
+function tableTotalLabel(table, cell, dir) {
+  const isLabel = c => c && c !== cell && !c.dataset.formula &&
+    c.textContent.trim() && parseCellNumber(c.textContent).num === null;
+  if (dir === 'left' || dir === 'right' || dir === 'row') {
+    const tr = cell.closest('tr');
+    for (const c of tr.cells) if (isLabel(c)) return c.textContent;
+    return 'Row' + (Array.from(table.rows).indexOf(tr) + 1);
+  }
+  const col = cell.cellIndex;
+  for (const row of table.rows) if (isLabel(row.cells[col])) return row.cells[col].textContent;
+  return 'Col' + (col + 1);
+}
+
+// "Dead load (kN/m2)" → "DeadLoad". Units in brackets are dropped, the words
+// joined in camel case rather than with underscores — an underscore is a
+// subscript here, so "Dead_load_Total" would render as a subscript inside a
+// subscript. Variable names must start with a letter.
+function nameFromLabel(label) {
+  const words = String(label || '').replace(/\([^)]*\)|\[[^\]]*\]/g, ' ')
+    .split(/[^A-Za-z0-9]+/).filter(Boolean);
+  let base = words.map((w, i) => i ? w[0].toUpperCase() + w.slice(1) : w).join('').slice(0, 24);
+  if (base && !/^[A-Za-z]/.test(base)) base = 'C' + base;
+  return base;
+}
+
+// A name nothing else in the document already uses. A clash would make
+// injectNamedCells refuse the cell, and a total that silently isn't a variable
+// is the problem this exists to fix.
+function uniqueVarName(base, exceptCell) {
+  const taken = new Set([...Object.keys(vars), ...definedVarNames()]);
+  document.querySelectorAll('[data-varname]').forEach(c => {
+    if (c !== exceptCell) taken.add(c.dataset.varname);
+  });
+  if (!taken.has(base)) return base;
+  // Dead_Total2, not Dead_Total_2: a second underscore would nest a subscript.
+  for (let n = 2; ; n++) if (!taken.has(base + n)) return base + n;
+}
+
+function suggestedTotalName(table, cell, dir) {
+  const base = nameFromLabel(tableTotalLabel(table, cell, dir));
+  return base ? uniqueVarName(base + '_Total', cell) : '';
+}
+
+// Σ Column and Σ Row name their result straight away — "Dead_Total" under a
+// "Dead" heading — so it can be used in the calculation below the table without
+// a trip to the Name dialog. A cell that already has a name keeps it: names are
+// what formulas elsewhere refer to, so one is never changed behind your back.
 function tblInsertFormula(dir) {
   if (!activeTable || !activeCell) return;
   activeCell.dataset.formula = '=sum(' + dir + ')';
   activeCell.classList.add('tbl-calc');
+  if (!activeCell.dataset.varname) {
+    const name = suggestedTotalName(activeTable, activeCell, dir);
+    if (name) activeCell.dataset.varname = name;
+  }
   // Evaluate immediately — focusout fires before the click so we can't rely on it.
   recomputeTableFormulas(activeTable);
   rebuildVars();
@@ -6167,7 +6222,11 @@ function tblNameVariable() {
   _tblVarCell = activeCell; _tblVarTable = activeTable;
   const inp = document.getElementById('tblVarInput');
   const unitInp = document.getElementById('tblVarUnitInput');
-  inp.value = _tblVarCell.dataset.varname || '';
+  let suggestion = '';
+  const f = parseTableFormula(_tblVarCell.dataset.formula || '');
+  if (!_tblVarCell.dataset.varname && f && f.fn === 'sum')
+    suggestion = suggestedTotalName(_tblVarTable, _tblVarCell, f.dir);
+  inp.value = _tblVarCell.dataset.varname || suggestion;
   inp.style.borderColor = '#ccc';
   unitInp.value = _tblVarCell.dataset.varunit || '';
   const modal = document.getElementById('tblVarModal');
@@ -6187,6 +6246,7 @@ function tblVarModalOk() {
   if (!trimmed) {
     delete _tblVarCell.dataset.varname;
     delete _tblVarCell.dataset.varunit;
+    _tblVarCell.removeAttribute('title');   // its "double-click to rename" no longer applies
   } else {
     _tblVarCell.dataset.varname = trimmed;
     if (unitTrimmed) _tblVarCell.dataset.varunit = unitTrimmed;
@@ -6225,7 +6285,7 @@ function injectNamedCells(table, seenNames) {
     }
     if (seenNames) seenNames.add(name);
     cell.classList.remove('dup-name');
-    if (cell.title && /already defined/.test(cell.title)) cell.removeAttribute('title');
+    cell.title = name + ' — double-click to rename';
     let num, autoUnit;
     if (cell.dataset.formula) {
       num = parseFloat(cell.dataset.value);
@@ -6253,6 +6313,15 @@ function refreshAllTables() {
   });
   rebuildVars(); // named cells may now contribute variables
 }
+document.addEventListener('dblclick', e => {
+  const cell = e.target.closest && e.target.closest('.calc-table td, .calc-table th');
+  if (!cell || !cell.closest('.calc-area')) return;
+  if (!cell.dataset.varname && !cell.dataset.formula) return;
+  e.preventDefault();
+  activeTable = cell.closest('.calc-table');
+  activeCell = cell;
+  tblNameVariable();
+});
 document.addEventListener('mousedown', e => { if (!e.target.closest('.calc-table') && !e.target.closest('#tblToolbar')) hideTableToolbar(); });
 
 // ── Colour & font controls ─────────────────────────────────────
