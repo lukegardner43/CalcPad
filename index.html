@@ -71,6 +71,7 @@ body{
   align-items:center;justify-content:center;gap:4px;
   font-family:Arial,sans-serif;font-size:12px;font-weight:700;color:var(--dark);transition:background .1s}
 .tbtn:hover{background:#fce6f1;border-color:#f4a8cc;color:var(--rubine)}
+.tbtn:disabled{opacity:.3;cursor:default;background:transparent;border-color:transparent;color:var(--dark)}
 .tbtn svg{width:13px;height:13px;fill:currentColor}
 .print-btn{background:var(--rubine)!important;color:#fff!important;
   border-color:var(--rubine)!important;padding:0 14px!important;margin-left:6px}
@@ -594,6 +595,13 @@ body.has-project{padding-left:230px}
       <div class="fd-item" onclick="exportWord()"><svg viewBox="0 0 14 14"><path d="M1 1h8l3 3v9H1V1zm3 5l1.5 4L7 6.5 8.5 10 10 6"/></svg>Export to Word…</div>
     </div>
   </div>
+  <div class="sep"></div>
+  <button class="tbtn" id="undoBtn" data-nohist onclick="histUndo()" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>
+    <svg viewBox="0 0 16 16" width="15" height="15"><path d="M5.5 3.5 2 7l3.5 3.5M2.5 7H10a3.5 3.5 0 0 1 0 7H7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </button>
+  <button class="tbtn" id="redoBtn" data-nohist onclick="histRedo()" title="Redo (Ctrl+Y)" aria-label="Redo" disabled>
+    <svg viewBox="0 0 16 16" width="15" height="15"><path d="M10.5 3.5 14 7l-3.5 3.5M13.5 7H6a3.5 3.5 0 0 0 0 7h3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </button>
   <input type="file" id="openFileInput" accept=".perega" style="display:none" onchange="loadFile(this)">
   <input type="file" id="openProjInput" accept=".peregaproj" style="display:none" onchange="loadProject(this)">
   <input type="file" id="addCheckInput" accept=".perega" multiple style="display:none" onchange="addCheckFromFile(this)">
@@ -3747,6 +3755,7 @@ let _autoSaveTimer = null;
 let _saveWarned = false;
 function autoSave() {
   if (_packRendering) return;   // the pack is being drawn check by check for printing (drawnChecks)
+  histNote();
   clearTimeout(_autoSaveTimer);
   _autoSaveTimer = setTimeout(() => {
     // In a pack it is the pack that has to survive a reload, not just whichever
@@ -6008,6 +6017,10 @@ function attachTableHandlers(table) {
   // for taps that don't move the caret.
   table.addEventListener('click', e => {
     const cell = e.target.closest('td,th'); if (!cell) return;
+    // Don't wait for selectionchange to say which cell this is: on a quick click
+    // and type it can come late, and the cell left behind then never commits —
+    // clearing a total and clicking away brought the formula straight back.
+    tblTrackCaret();
     activeCell = cell;
     showTableToolbar(table, cell);
     if (cell.dataset.formula && cell.textContent !== cell.dataset.formula)
@@ -6084,7 +6097,8 @@ function revealCellFormula(cell) {
   }
 }
 
-document.addEventListener('selectionchange', () => {
+// Which cell the caret is in: commit the one it left, reveal the one it entered.
+function tblTrackCaret() {
   const cell = caretTableCell();
   if (cell === _tblSelCell) return;
   const prev = _tblSelCell;
@@ -6104,7 +6118,8 @@ document.addEventListener('selectionchange', () => {
   } else if (prev) {
     hideTableToolbar();
   }
-});
+}
+document.addEventListener('selectionchange', tblTrackCaret);
 function tblAddRowBelow() { if (!activeTable||!activeCell) return; const row=activeCell.closest('tr'); const cc=activeTable.rows[0].cells.length; const nr=document.createElement('tr'); for(let i=0;i<cc;i++){const td=document.createElement('td');td.contentEditable='true';nr.appendChild(td);} row.parentNode.insertBefore(nr,row.nextSibling); recomputeTableFormulas(activeTable); rebuildVars(); nr.cells[0].focus(); }
 function tblAddRowAbove() { if (!activeTable||!activeCell) return; const row=activeCell.closest('tr'); const cc=activeTable.rows[0].cells.length; const nr=document.createElement('tr'); for(let i=0;i<cc;i++){const td=document.createElement('td');td.contentEditable='true';nr.appendChild(td);} row.parentNode.insertBefore(nr,row); recomputeTableFormulas(activeTable); rebuildVars(); nr.cells[0].focus(); }
 function tblAddColRight() { if (!activeTable||!activeCell) return; const idx=activeCell.cellIndex; Array.from(activeTable.rows).forEach((row,ri)=>{const c=ri===0?document.createElement('th'):document.createElement('td');c.contentEditable='true';const ref=row.cells[idx+1]||null;row.insertBefore(c,ref?ref.nextSibling:null);}); recomputeTableFormulas(activeTable); rebuildVars(); }
@@ -6553,6 +6568,192 @@ function buildSaveData() {
   return JSON.stringify({ ...captureDoc(), savedAt:new Date().toISOString() }, null, 2);
 }
 
+// ══ UNDO / REDO ═══════════════════════════════════════════════
+// The browser's own undo can't be used. It only knows the edits it made itself,
+// and this page rewrites its own content all the time — formulas drawn, text
+// moved onto the next sheet, table totals recalculated — after which its history
+// no longer matches the page and Ctrl+Z does nothing, or the wrong thing.
+//
+// So CalcPad keeps its own: a snapshot of the document (what autosave stores)
+// each time editing pauses, and Ctrl+Z / Ctrl+Y step between them, putting the
+// caret back where the edit was. Only what you did becomes a step: the page
+// tidying itself (reflow, a picture loading) updates the current snapshot
+// instead, so undo never stops on a change you didn't make.
+const HIST_MAX = 100;
+let _hist = null;             // { stack: [{ doc, caret }], pos } for the document on screen
+let _histTimer = null, _histSince = 0;
+let _histTouched = false;     // you have changed something since the last snapshot
+let _histApplying = false;
+// A picture is stored once, not in every snapshot that contains it.
+const _histImgIds = new Map(), _histImgs = [];
+
+function histSnapshot() {
+  return JSON.stringify(captureDoc()).replace(/data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+\/=]+/gi, m => {
+    let id = _histImgIds.get(m);
+    if (id === undefined) { id = _histImgs.length; _histImgIds.set(m, id); _histImgs.push(m); }
+    return '@@CPIMG' + id + '@@';
+  });
+}
+function histParse(doc) {
+  return JSON.parse(doc.replace(/@@CPIMG(\d+)@@/g, (m, i) => _histImgs[+i] || ''));
+}
+
+// The caret as a count of characters from the top of the first sheet, which
+// survives the sheets being rebuilt. null when it isn't on a sheet.
+function histCaret() {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return null;
+  const r0 = sel.getRangeAt(0);
+  const n = r0.startContainer;
+  const el = n.nodeType === Node.ELEMENT_NODE ? n : n.parentElement;
+  const ed = el && el.closest ? el.closest('.calc-area') : null;
+  if (!ed) return null;
+  let off = 0;
+  for (const e of getAllEditors()) { if (e === ed) break; off += e.textContent.length; }
+  const r = document.createRange();
+  r.setStart(ed, 0); r.setEnd(n, r0.startOffset);
+  return off + r.toString().length;
+}
+function histPlaceCaret(off) {
+  if (off == null) return;
+  const eds = getAllEditors();
+  for (let i = 0; i < eds.length; i++) {
+    const ed = eds[i], len = ed.textContent.length;
+    if (off > len && i < eds.length - 1) { off -= len; continue; }
+    const w = document.createTreeWalker(ed, NodeFilter.SHOW_TEXT);
+    let t = null, node;
+    while ((node = w.nextNode())) { t = node; if (off <= node.length) break; off -= node.length; }
+    const r = document.createRange();
+    const lock = t && t.parentElement.closest('[contenteditable="false"]');
+    if (!t) { r.selectNodeContents(ed); r.collapse(false); }
+    else if (lock && lock !== ed && ed.contains(lock)) r.setStartAfter(lock);   // inside a drawn formula: just after it
+    else r.setStart(t, Math.max(0, Math.min(off, t.length)));
+    r.collapse(true);
+    ed.focus({ preventScroll: true });
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    const at = t ? (lock || t.parentElement) : ed;
+    const box = at.getBoundingClientRect();
+    if (box.top < 60 || box.bottom > window.innerHeight - 20) at.scrollIntoView({ block: 'center' });
+    return;
+  }
+}
+
+function histButtons() {
+  const u = document.getElementById('undoBtn'), r = document.getElementById('redoBtn');
+  if (!u || !r) return;
+  u.disabled = !(_hist && (_hist.pos > 0 || (_histTimer && _histTouched)));
+  r.disabled = !(_hist && _hist.pos < _hist.stack.length - 1 && !(_histTimer && _histTouched));
+}
+function histClear() {
+  clearTimeout(_histTimer); _histTimer = null; _histSince = 0;
+  _hist = null; _histTouched = false;
+  histButtons();
+}
+// The state before your first change, taken the moment you start one.
+function histEnsure() {
+  if (!_hist) _hist = { stack: [{ doc: histSnapshot(), caret: histCaret() }], pos: 0 };
+}
+// An edit is starting: the snapshot it will be undone back to should put the
+// caret where the edit is, not where the previous one ended.
+function histStartEdit() {
+  if (_histApplying) return;
+  histEnsure();
+  if (!_histTimer && !_histTouched) {
+    const c = histCaret();
+    if (c != null) _hist.stack[_hist.pos].caret = c;
+  }
+  _histTouched = true;
+}
+// Called by autoSave(): something changed. It becomes a step once editing
+// pauses, or every couple of seconds through a long run of typing.
+function histNote() {
+  if (_histApplying || !_hist) return;
+  const now = Date.now();
+  if (!_histSince) _histSince = now;
+  clearTimeout(_histTimer);
+  if (now - _histSince > 2500) histFlush();
+  else { _histTimer = setTimeout(histFlush, 600); histButtons(); }
+}
+function histFlush() {
+  clearTimeout(_histTimer); _histTimer = null; _histSince = 0;
+  if (!_hist || _histApplying) { histButtons(); return; }
+  const doc = histSnapshot();
+  const cur = _hist.stack[_hist.pos];
+  if (doc !== cur.doc) {
+    if (!_histTouched) cur.doc = doc;              // the page tidying itself, not an edit
+    else {
+      _hist.stack.length = _hist.pos + 1;          // a new edit ends the redo trail
+      _hist.stack.push({ doc, caret: histCaret() });
+      if (_hist.stack.length > HIST_MAX) _hist.stack.shift();
+      _hist.pos = _hist.stack.length - 1;
+    }
+  }
+  _histTouched = false;
+  histButtons();
+}
+function histApply(entry) {
+  clearTimeout(_histTimer); _histTimer = null; _histSince = 0;
+  _histApplying = true;
+  try { applyDoc(histParse(entry.doc)); }
+  finally { _histApplying = false; }
+  _histTouched = false;
+  histPlaceCaret(entry.caret);
+  isDirty = true; autoSave();
+  histButtons();
+}
+function histUndo() {
+  if (!_hist) return;
+  histFlush();                                     // what you just typed becomes a step first
+  if (_hist.pos === 0) return;
+  _hist.pos--;
+  histApply(_hist.stack[_hist.pos]);
+}
+function histRedo() {
+  if (!_hist) return;
+  if (_histTimer) histFlush();
+  if (_hist.pos >= _hist.stack.length - 1) return;
+  _hist.pos++;
+  histApply(_hist.stack[_hist.pos]);
+}
+
+// What counts as you changing something. Listening in the capture phase means
+// the "before" state is taken before the page's own handlers make the change.
+document.addEventListener('keydown', e => {
+  if (!_hist && !_histApplying) histEnsure();
+  // Enter ends a step, so each line undoes on its own.
+  if (e.key === 'Enter' && _histTimer && _histTouched) histFlush();
+}, true);
+document.addEventListener('mousedown', () => { if (!_hist && !_histApplying) histEnsure(); }, true);
+document.addEventListener('beforeinput', e => {
+  if (e.inputType === 'historyUndo' || e.inputType === 'historyRedo') return;
+  histStartEdit();
+}, true);
+['input', 'change', 'paste', 'cut', 'drop'].forEach(type =>
+  document.addEventListener(type, () => { if (!_histApplying) { histEnsure(); _histTouched = true; } }, true));
+document.addEventListener('click', e => {
+  const t = e.target.closest && e.target.closest('button, [onclick], .fd-item, select, .tbl-touch-btn');
+  if (t && !t.closest('[data-nohist]')) histStartEdit();
+}, true);
+
+// Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z. A text box of its own — the title block, a
+// dialog — keeps the browser's undo, which is right for a single field.
+const histOwnBox = t => t && t.matches && t.matches('input, textarea, select');
+document.addEventListener('keydown', e => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k !== 'z' && k !== 'y') return;
+  if (histOwnBox(e.target)) return;
+  e.preventDefault(); e.stopPropagation();
+  if (k === 'y' || e.shiftKey) histRedo(); else histUndo();
+}, true);
+// The browser's own Undo (Edit menu, right-click) comes through here.
+document.addEventListener('beforeinput', e => {
+  if (e.inputType !== 'historyUndo' && e.inputType !== 'historyRedo') return;
+  if (histOwnBox(e.target)) return;
+  e.preventDefault();
+  if (e.inputType === 'historyUndo') histUndo(); else histRedo();
+}, true);
+
 // ══ PROOFING ═══════════════════════════════════════════════════
 // A rule-based check over the document's prose. No model, no network, no key —
 // it runs on lists and regular expressions, so it is free, instant, and gives
@@ -6957,6 +7158,7 @@ function projectNew() {
   addCheck('Check 1', null, true);
   isDirty = false;
   setProjectTitle();
+  histClear();
 }
 
 async function projectOpen() {
@@ -7176,6 +7378,7 @@ function openCheck(id) {
   setProjectTitle();
   renderProjectPanel();
   projectAutoSave();
+  histClear();
 }
 
 function renameCheck(id) {
@@ -7469,6 +7672,7 @@ function fileNew() {
   currentFileName = 'Untitled'; isDirty = false; document.title = 'Untitled — CalcPad';
   try { localStorage.removeItem(LS_KEY); } catch(e) {}
   rebuildVars();
+  histClear();
 }
 // Save and Save as write one .perega. With a pack open that is one check, not
 // the pack — and the two look identical afterwards until the job is reopened
@@ -7596,6 +7800,7 @@ function adoptLoadedDoc(data, name) {
   currentFileName = String(name || 'Untitled').replace(/\.perega$/, '');
   isDirty = false;
   document.title = currentFileName + ' — CalcPad';
+  histClear();
 }
 
 async function fileOpen() {
